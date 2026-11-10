@@ -8,6 +8,30 @@ QEMU avec les bibliothèques de la voiture).
 
 ## [Non publié]
 
+### Ajouté
+
+- Transport Android Auto USB/AOA facultatif, avec le même protocole TLS, décodeur, commandes, GPS et micro que le
+  transport TCP. Le son reste sur le Bluetooth BMW. Sans fichier `usb-phone`, le démarrage reste sans fil.
+- Sélection au démarrage par `/var/local/data/AA/usb-phone` : `auto PORT VID PID` choisit USB si le téléphone est
+  présent sur ce port, sinon sans fil ; `PORT VID PID` impose USB. Aucun basculement pendant une session.
+  [Configuration et limites](docs/USB.md).
+- Requêtes de contrôle AOA 51/52/53 envoyées uniquement au téléphone choisi, puis interface 0 et paire bulk validées
+  sur le même port après réénumération. Utilisation de la libusb déjà installée, sans détachement, reset, changement
+  de configuration ni arrêt d'un service BMW. Aucun changement au point d'accès du téléphone.
+- Tests simulés des transferts partiels, annulation, descripteurs, refus d'interface occupée, sélection au démarrage,
+  arrêt et verrou du superviseur. Le relevé figé du téléphone est aussi rejoué sur USB, sans modifier ses octets.
+
+### Validation et limites
+
+- Essais courts en voiture sur BMW X3, EntryNav2 `002_146`, écran 1280×480, Samsung S24+ : image, molette et appui
+  iDrive, son Bluetooth et micro confirmés. Le démarrage automatique USB depuis le menu iDrive a également fonctionné.
+  Le test borné à 180 s inclut l'attente du branchement ; il représente environ 131 s de projection, pas 180 s.
+- Après Arrêter, le processus BMW `vmostAuxInUSB` peut prendre l'interface AOA. Un débranchement/rebranchement avant
+  Démarrer peut rester nécessaire ; le service ne lui reprend jamais l'interface.
+- La stabilité sur 20 minutes, le débranchement/rebranchement en projection, le retour sans fil dans cette voiture et
+  la caméra de recul ne sont pas validés par ces essais. La matrice ARM/QEMU complète reste à exécuter pour cette
+  contribution. Les journaux et fichiers de la voiture ne font pas partie du dépôt.
+
 ## [0.11.0-rc.1] - 2026-11-10 · PC
 
 Version candidate, **testée sur PC seulement** : à essayer en voiture avant la 0.11.0. Installée par-dessus la 0.10.0,

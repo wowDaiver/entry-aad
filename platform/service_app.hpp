@@ -78,6 +78,7 @@ public:
     static void navStatus(uint16_t msgId, const uint8_t* body, size_t len, void* user);
     static void ended(void* user);
     static void connected(int fd, void* user);
+    static void connectedTransport(aa::Transport* transport, void* user);
     static void* wireless(void* user);  // thread: runWirelessLoop, then the failure the main loop sees
 
     // ---- WirelessHost ----
@@ -109,7 +110,7 @@ public:
     int pendingFocus;  // service: 1 tell the phone FOCUSED, 2 NATIVE (sent from the main loop)
     PeekTiming peek;   // under mu
     EvoPill pill;
-    unsigned sppLinks, tcpLinks;
+    unsigned sppLinks, tcpLinks, usbLinks;
     std::atomic<unsigned> videoFrames;  // counted on the session thread without mu
     bool wppReply, wppAccepted;
 

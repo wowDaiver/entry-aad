@@ -110,6 +110,13 @@ Sur l'iDrive : *Media*, puis *Android Auto*, puis *Démarrer*. La première fois
 Bluetooth s'il ne l'est pas déjà, et accepter la voiture sur le téléphone : Android Auto rejoint ensuite le Wi-Fi de la
 voiture tout seul. La case *Démarrage automatique* du menu lance Android Auto avec l'iDrive.
 
+## USB facultatif
+
+Les versions publiées avant cette contribution restent sans fil. Pour une compilation incluant le transport USB,
+voir [USB](USB.md) : seul le fichier facultatif `/var/local/data/AA/usb-phone` est ajouté aux réglages. La négociation
+AOA écrit des requêtes de contrôle USB au téléphone sélectionné ; elle ne modifie aucun fichier BMW. Le mode USB
+n'emprunte pas le Bluetooth de démarrage et n'active pas le point d'accès Wi-Fi de la voiture.
+
 ## Mettre à jour
 
 Refaire les étapes 1 à 3 avec la nouvelle archive, après avoir arrêté Android Auto depuis son menu. Les réglages de

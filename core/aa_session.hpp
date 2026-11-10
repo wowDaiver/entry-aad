@@ -12,6 +12,7 @@
 #include "aa_input.hpp"
 #include "aa_messages.hpp"
 #include "aa_tls.hpp"
+#include "aa_transport.hpp"
 #include "car_inbox.hpp"
 #include "car_location.hpp"
 
@@ -39,6 +40,8 @@ public:
     // Takes the socket and starts the session thread; a session still running is ended first, and its ended
     // callback runs. False when the thread could not start: the socket is closed.
     bool start(int client_fd);
+    // Takes ownership on every path. USB and TCP share TLS, channels and car callbacks.
+    bool start(Transport* transport);
     // Ends the session and joins its thread. The ended callback does not run.
     void stop();
     bool isActive() const { return running(); }
@@ -80,15 +83,15 @@ private:
     };
     enum Received { kMessage, kNothing, kLost };
 
-    // Lifecycle (aa_session.cpp). Only the session thread closes the socket; start() and stop() shut it down to
-    // wake that thread, then join it. socketLock_ keeps that shutdown from racing with the close.
+    // Lifecycle (aa_session.cpp). Only the session thread deletes the transport; start() and stop() cancel it to
+    // wake that thread, then join it. socketLock_ keeps cancellation from racing with destruction.
     static void* threadMain(void* self);
     void run();
     bool running() const;
     void setRunning(bool on);
     bool clearRunning();  // the previous value
     void interrupt();
-    void closeSocket();
+    void closeTransport();
     void finish();
     void resetCounters();
 
@@ -129,8 +132,8 @@ private:
 
     pthread_mutex_t lifecycleLock_;  // start() and stop(), called from the accept and main threads
     mutable pthread_mutex_t socketLock_;
-    int socket_;    // guarded by socketLock_
-    bool running_;  // guarded by socketLock_
+    Transport* transport_;  // guarded by socketLock_; I/O only on session thread
+    bool running_;          // guarded by socketLock_
     pthread_t thread_;
 
     Callback<SessionEndedCallback> ended_;
@@ -146,6 +149,7 @@ private:
     // Session thread only.
     TlsClient tls_;
     MessageAssembler assembler_;
+    bool ioFailed_;               // session thread only; a partial failed send must end the byte stream
     bool videoReady_;             // the phone set the video channel up: a focus can go
     uint32_t mediaSessions_[32];  // per channel, the session id of its start indication, echoed in our acks
     uint32_t mediaMessages_;      // media messages received, every channel

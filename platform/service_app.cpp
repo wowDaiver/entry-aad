@@ -30,6 +30,7 @@ ServiceApp::ServiceApp(uint16_t p, bool v, volatile sig_atomic_t* quit)
       pendingFocus(0),
       sppLinks(0),
       tcpLinks(0),
+      usbLinks(0),
       videoFrames(0),
       wppReply(false),
       wppAccepted(false),
@@ -335,10 +336,17 @@ void ServiceApp::ended(void* user) {
 }
 
 void ServiceApp::connected(int fd, void* user) {
+    connectedTransport(aa::socketTransport(fd), user);
+}
+
+void ServiceApp::connectedTransport(aa::Transport* transport, void* user) {
+    if (!transport) {
+        return;
+    }
     ServiceApp* a = static_cast<ServiceApp*>(user);
     pthread_mutex_lock(&a->connectMu);
     if (a->stopRequested()) {
-        close(fd);
+        delete transport;
         pthread_mutex_unlock(&a->connectMu);
         return;
     }
@@ -346,16 +354,20 @@ void ServiceApp::connected(int fd, void* user) {
     bool ready = a->ready;
     pthread_mutex_unlock(&a->mu);
     if (!ready) {
-        close(fd);
+        delete transport;
         a->server.notifySessionEnded();
         pthread_mutex_unlock(&a->connectMu);
         return;
     }
     pthread_mutex_lock(&a->mu);
-    ++a->tcpLinks;
+    if (!strcmp(transport->name(), "USB/AOA")) {
+        ++a->usbLinks;
+    } else {
+        ++a->tcpLinks;
+    }
     a->tcpPreparing = true;
     pthread_mutex_unlock(&a->mu);
-    ELOG("ServiceApp", "phone TCP connection received; preparing the video and the AA session");
+    ELOG("ServiceApp", "phone transport connection received; preparing the video and the AA session");
     a->session.stop();  // join callbacks before destroying/reinitializing video buffers
     bool videoOk = true;
     if (a->videoEnabled) {
@@ -366,7 +378,7 @@ void ServiceApp::connected(int fd, void* user) {
     }
     pthread_mutex_lock(&a->mu);
     if (!videoOk) {
-        close(fd);
+        delete transport;
         a->server.notifySessionEnded();
         a->tcpPreparing = false;
         pthread_mutex_unlock(&a->mu);
@@ -375,8 +387,8 @@ void ServiceApp::connected(int fd, void* user) {
     }
     a->focus = true;
     pthread_mutex_unlock(&a->mu);
-    if (!a->session.start(fd)) {
-        a->server.notifySessionEnded();  // start owns/cleans fd even on failure
+    if (!a->session.start(transport)) {
+        a->server.notifySessionEnded();  // start owns/cleans transport even on failure
     } else {
         a->server.markSessionActive();
         if (!a->session.isActive()) {
