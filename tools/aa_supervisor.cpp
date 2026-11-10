@@ -36,6 +36,8 @@
 #include "evo_wlan.hpp"
 #include "service_contract.hpp"
 #include "spp_baseline.hpp"
+#include "transport_policy.hpp"
+#include "usb_transport.hpp"
 #include "vmost_client.hpp"
 
 extern char** environ;
@@ -381,8 +383,9 @@ int compatReport() {
     return 0;
 }
 // STOP, created there by the iDrive app: the service stops.
+const char* stopPath = evo::contract::kServiceStop;
 bool stopFilePresent() {
-    return access(evo::contract::kServiceStop, F_OK) == 0;
+    return access(stopPath, F_OK) == 0;
 }
 // --service: working directory for the recovery journal and STOP (RAM; a reboot restores Bluetooth anyway).
 bool enterServiceDir() {
@@ -402,6 +405,178 @@ void boundLog() {
         ELOG("Supervisor", "log emptied (16 MB reached)");
     }
 }
+int selectAndRunService(const std::string& daemon, int lock, int usbConfig, const aa::UsbSelection& usbSelection,
+                        const char* sysfs = "/sys/bus/usb/devices", unsigned stopGraceMs = 10000) {
+    const bool automatic = usbConfig == 1 && usbSelection.automatic;
+    bool usb = usbConfig == 1;
+    if (automatic) {
+        const evo::PhonePresence presence = evo::phonePresence(usbSelection, sysfs);
+        if (presence == evo::kPresenceUnknown) {
+            ELOG("Supervisor", "selected USB port unreadable: automatic start refused");
+            return 1;
+        }
+        usb = evo::startupTransport(presence) == evo::kUsbProjection;
+        ELOG("Supervisor", "auto transport at startup: %s; cable changes apply only after Stop/Start",
+             usb ? "USB" : "wireless");
+    }
+    g_wlanAuto = !usb;  // Only the BMW access point is requested; the phone hotspot is never changed.
+    evo::SppSnapshotReader reader;
+    Baseline baseline = {};
+    // At boot (autostart) the hotspot or Alps may not be ready yet: retry for up to 2 minutes.
+    uint32_t t0 = evo::monoMs();
+    while (true) {
+        bool ready = false;
+        if (usb) {
+            evo::EvoIlm ilm;
+            bool topFirst = false;
+            ready = ilm.validateTarget(surface, layer, 1280, 480) && ilm.renderOrderTopFirst(topFirst);
+        } else {
+            ready = preflight(reader, baseline);
+        }
+        if (ready) {
+            break;
+        }
+        if (stopRequested || stopFilePresent()) {
+            unlink(stopPath);
+            ELOG("Supervisor", "stop asked during the preflight: nothing was changed");
+            return 1;
+        }
+        if (evo::monoMs() - t0 >= 120000) {
+            ELOG("Supervisor", "preflight still refused after 2 min: giving up, nothing was changed");
+            return 1;
+        }
+        ELOG("Supervisor", "preflight refused: trying again in 5 s");
+        for (int i = 0; i < 10 && !stopRequested && !stopFilePresent(); ++i) {
+            usleep(500000);
+        }
+    }
+    if (stopRequested || (!usb && !save(baseline))) {
+        ELOG("Supervisor", "Alps state not saved (or saved incompletely), or a previous restore pending");
+        return 1;
+    }
+    // Everything the service needs is on its command line: its mode, and the Alps state saved above, which it checks
+    // again before registering the Android Auto UUID.
+    char expectedPid[32];
+    snprintf(expectedPid, sizeof(expectedPid), "%d", baseline.pid);
+    std::vector<std::string> argList;
+    argList.push_back(daemon);
+    argList.push_back("--run");
+    argList.push_back("--input");
+    argList.push_back("forward");
+    argList.push_back("--service");
+    if (usb) {
+        char vid[16], pid[16], lockNumber[16];
+        snprintf(vid, sizeof(vid), "0x%x", usbSelection.vendor);
+        snprintf(pid, sizeof(pid), "0x%x", usbSelection.product);
+        snprintf(lockNumber, sizeof(lockNumber), "%d", lock);
+        argList.push_back("--usb-port");
+        argList.push_back(usbSelection.port);
+        argList.push_back("--usb-vid");
+        argList.push_back(vid);
+        argList.push_back("--usb-pid");
+        argList.push_back(pid);
+        if (automatic) {
+            // The automatic profile explicitly selects this physical connector. Never detach a BMW owner.
+            argList.push_back("--usb-adopt-accessory");
+        }
+        argList.push_back("--usb-lock-fd");
+        argList.push_back(lockNumber);
+        // Share the same open-file-description lock with the child. The daemon verifies the inode and flock.
+        if (fcntl(lock, F_SETFD, 0)) {
+            return 1;
+        }
+    } else {
+        argList.push_back("--configure-spp");
+        argList.push_back("--alps-pid");
+        argList.push_back(expectedPid);
+        argList.push_back("--alps-start");
+        argList.push_back(baseline.identity);
+        argList.push_back("--uuid-pair");
+        argList.push_back(hex(baseline.uuid));
+    }
+    std::vector<char*> args;
+    for (size_t i = 0; i < argList.size(); ++i) {
+        args.push_back(const_cast<char*>(argList[i].c_str()));
+    }
+    args.push_back(nullptr);
+    posix_spawnattr_t attrs;
+    int rc = posix_spawnattr_init(&attrs);
+    pid_t child = -1;
+    if (!rc) {
+        rc = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
+        if (!rc) {
+            rc = posix_spawnattr_setpgroup(&attrs, 0);
+        }
+        if (!rc) {
+            rc = posix_spawn(&child, args[0], nullptr, &attrs, &args[0], environ);
+        }
+        posix_spawnattr_destroy(&attrs);
+    }
+    if (usb) {
+        fcntl(lock, F_SETFD, FD_CLOEXEC);
+    }
+    if (rc) {
+        ELOG("Supervisor", "cannot start entry-aad: %s", strerror(rc));
+    }
+    int status = 0;
+    bool ended = rc != 0, forced = false;
+    uint32_t stopping = 0;
+    ELOG("Supervisor",
+         "%s Android Auto: service with no time limit (stopped by the iDrive app); iDrive inputs: controller "
+         "and touchscreen forwarded to AA",
+         usb ? "USB" : "wireless");
+    uint32_t lastBound = evo::monoMs();
+    while (!ended) {
+        pid_t done = waitpid(child, &status, WNOHANG);
+        if (done == child) {
+            ended = true;
+            break;
+        }
+        if (done < 0 && errno != EINTR) {
+            ELOG("Supervisor",
+                 "restore: end of entry-aad not confirmed: journal kept, use --recover once it has stopped");
+            return 1;
+        }
+        bool stop = stopRequested || stopFilePresent();
+        if (evo::monoMs() - lastBound >= 5000) {
+            lastBound = evo::monoMs();
+            boundLog();
+        }
+        if (stop && !stopping) {
+            stopping = evo::monoMs();
+            kill(child, SIGTERM);
+        }
+        if (stopping && evo::monoMs() - stopping >= stopGraceMs) {
+            kill(-child, SIGKILL);
+            do {
+                done = waitpid(child, &status, 0);
+            } while (done < 0 && errno == EINTR);
+            if (done != child) {
+                ELOG("Supervisor", "restore: forced stop not confirmed: journal kept");
+                return 1;
+            }
+            forced = true;
+            break;
+        }
+        usleep(100000);
+    }
+    // The supervisor is separate from the video/session process: it also restores after a crash.
+    bool restored = usb || recover(baseline, reader);
+    if (!restored) {
+        ELOG("Supervisor", "restore: RESTORE NOT CONFIRMED: keep bluetooth-retour.txt, use --recover");
+    }
+    if (forced) {
+        ELOG("Supervisor", "entry-aad killed: check that our surface is gone from the final listing");
+    }
+    unlink(stopPath);
+    ELOG("Supervisor", "done (Bluetooth %s)",
+         usb ? "unchanged by USB mode" : (restored ? "restored" : "RESTORE NOT CONFIRMED"));
+    if (!restored || rc || forced || !WIFEXITED(status)) {
+        return 1;
+    }
+    // entry-aad's 2 (command line refused) is passed on as is.
+    return WEXITSTATUS(status) == 2 ? 2 : (WEXITSTATUS(status) == 0 ? 0 : 1);
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -412,14 +587,22 @@ int main(int argc, char** argv) {
     if (argc != 2 || (!strcmp(argv[1], "--help"))) {
         puts(
             "Usage: aa-supervisor --service | --compat | --recover\n"
-            "  --service  started by the iDrive app: wireless Android Auto with no time limit, stopped by the app or\n"
-            "             STOP; the BMW hotspot switched on as Apple CarPlay does when it is off\n"
+            "  --service  iDrive service; [auto ]PORT VID PID in usb-phone selects auto or USB-only; absent = "
+            "wireless\n"
+            "             auto chooses once at startup; changing the cable does not switch a running service\n"
             "  --compat   what a start would find on this car, changing nothing\n"
             "  --recover  gives Bluetooth back after an unconfirmed stop (journal in the current folder)");
         return argc == 2 ? 0 : 2;
     }
     const bool service = !strcmp(argv[1], "--service"), restore = !strcmp(argv[1], "--recover");
-    g_wlanAuto = service;  // the BMW hotspot is switched on as Apple CarPlay does, only for the iDrive app's service
+    setenv("XDG_RUNTIME_DIR", "/run/system/0", 0);
+    setenv("WAYLAND_DISPLAY", "wayland-0", 0);
+    aa::UsbSelection usbSelection;
+    const int usbConfig = service ? usbSelection.loadFile("/var/local/data/AA/usb-phone") : 0;
+    if (usbConfig < 0) {
+        ELOG("Supervisor", "USB opt-in file is unsafe or invalid; start refused");
+        return 2;
+    }
     if (!service && !restore) {
         return 2;
     }
@@ -454,7 +637,7 @@ int main(int argc, char** argv) {
              evo::contract::kServiceDir);
     }
     evo::SppSnapshotReader reader;
-    Baseline baseline;
+    Baseline baseline = {};
     if (service && access(journal, F_OK) == 0) {
         // A previous service of this boot ended without a confirmed restore: finish it before anything else.
         if (!load(baseline) || !reader.open() || !recover(baseline, reader)) {
@@ -477,119 +660,5 @@ int main(int argc, char** argv) {
         }
         return recover(baseline, reader) ? 0 : 1;
     }
-    // At boot (autostart) the hotspot or Alps may not be ready yet: retry for up to 2 minutes.
-    uint32_t t0 = evo::monoMs();
-    while (!preflight(reader, baseline)) {
-        if (stopRequested || stopFilePresent()) {
-            unlink(evo::contract::kServiceStop);
-            ELOG("Supervisor", "stop asked during the preflight: nothing was changed");
-            return 1;
-        }
-        if (evo::monoMs() - t0 >= 120000) {
-            ELOG("Supervisor", "preflight still refused after 2 min: giving up, nothing was changed");
-            return 1;
-        }
-        ELOG("Supervisor", "preflight refused: trying again in 5 s");
-        for (int i = 0; i < 10 && !stopRequested && !stopFilePresent(); ++i) {
-            usleep(500000);
-        }
-    }
-    if (stopRequested || !save(baseline)) {
-        ELOG("Supervisor", "Alps state not saved (or saved incompletely), or a previous restore pending");
-        return 1;
-    }
-    // Everything the service needs is on its command line: its mode, and the Alps state saved above, which it checks
-    // again before registering the Android Auto UUID.
-    char expectedPid[32];
-    snprintf(expectedPid, sizeof(expectedPid), "%d", baseline.pid);
-    std::vector<std::string> argList;
-    argList.push_back(daemon);
-    argList.push_back("--run");
-    argList.push_back("--configure-spp");
-    argList.push_back("--input");
-    argList.push_back("forward");
-    argList.push_back("--service");
-    argList.push_back("--alps-pid");
-    argList.push_back(expectedPid);
-    argList.push_back("--alps-start");
-    argList.push_back(baseline.identity);
-    argList.push_back("--uuid-pair");
-    argList.push_back(hex(baseline.uuid));
-    std::vector<char*> args;
-    for (size_t i = 0; i < argList.size(); ++i) {
-        args.push_back(const_cast<char*>(argList[i].c_str()));
-    }
-    args.push_back(nullptr);
-    posix_spawnattr_t attrs;
-    int rc = posix_spawnattr_init(&attrs);
-    pid_t child = -1;
-    if (!rc) {
-        rc = posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
-        if (!rc) {
-            rc = posix_spawnattr_setpgroup(&attrs, 0);
-        }
-        if (!rc) {
-            rc = posix_spawn(&child, args[0], nullptr, &attrs, &args[0], environ);
-        }
-        posix_spawnattr_destroy(&attrs);
-    }
-    if (rc) {
-        ELOG("Supervisor", "cannot start entry-aad: %s", strerror(rc));
-    }
-    int status = 0;
-    bool ended = rc != 0, forced = false;
-    uint32_t stopping = 0;
-    ELOG("Supervisor",
-         "wireless Android Auto: service with no time limit (stopped by the iDrive app); iDrive inputs: controller "
-         "and touchscreen forwarded to AA");
-    uint32_t lastBound = evo::monoMs();
-    while (!ended) {
-        pid_t done = waitpid(child, &status, WNOHANG);
-        if (done == child) {
-            ended = true;
-            break;
-        }
-        if (done < 0 && errno != EINTR) {
-            ELOG("Supervisor",
-                 "restore: end of entry-aad not confirmed: journal kept, use --recover once it has stopped");
-            return 1;
-        }
-        bool stop = stopRequested || stopFilePresent();
-        if (evo::monoMs() - lastBound >= 5000) {
-            lastBound = evo::monoMs();
-            boundLog();
-        }
-        if (stop && !stopping) {
-            stopping = evo::monoMs();
-            kill(child, SIGTERM);
-        }
-        if (stopping && evo::monoMs() - stopping >= 10000) {
-            kill(-child, SIGKILL);
-            do {
-                done = waitpid(child, &status, 0);
-            } while (done < 0 && errno == EINTR);
-            if (done != child) {
-                ELOG("Supervisor", "restore: forced stop not confirmed: journal kept");
-                return 1;
-            }
-            forced = true;
-            break;
-        }
-        usleep(100000);
-    }
-    // The supervisor is separate from the video/session process: it also restores after a crash.
-    bool restored = recover(baseline, reader);
-    if (!restored) {
-        ELOG("Supervisor", "restore: RESTORE NOT CONFIRMED: keep bluetooth-retour.txt, use --recover");
-    }
-    if (forced) {
-        ELOG("Supervisor", "entry-aad killed: check that our surface is gone from the final listing");
-    }
-    unlink(evo::contract::kServiceStop);
-    ELOG("Supervisor", "done (Bluetooth restore %s)", restored ? "confirmed" : "NOT CONFIRMED");
-    if (!restored || rc || forced || !WIFEXITED(status)) {
-        return 1;
-    }
-    // entry-aad's 2 (command line refused) is passed on as is.
-    return WEXITSTATUS(status) == 2 ? 2 : (WEXITSTATUS(status) == 0 ? 0 : 1);
+    return selectAndRunService(daemon, lock, usbConfig, usbSelection);
 }

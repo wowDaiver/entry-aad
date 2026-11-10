@@ -22,6 +22,10 @@
 #include "service_app.hpp"
 #include "service_contract.hpp"
 #include "aa_session.hpp"
+#include "usb_transport.hpp"
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include "tcp_server.hpp"
 #include "crash_handler.hpp"
 #include <csignal>
@@ -83,6 +87,8 @@ void usage(const char* argv0) {
         "  --run         register the Android Auto UUID and open the TCP server (50000)\n"
         "Options of --run, given by aa-supervisor:\n"
         "  --configure-spp        allow setting 0x6203 to 1 when needed\n"
+        "  --usb-port BUS-PORT[.PORT] --usb-vid 0xVID --usb-pid 0xPID  USB only; exact phone before AOA\n"
+        "  --usb-adopt-accessory   explicitly allow the selected port already in AOA mode\n"
         "  --no-video             no picture\n"
         "  --input forward|observe|off   controller and touchscreen to AA, only logged, or ignored\n"
         "  --service | --limit-seconds N (180 at most)\n"
@@ -93,12 +99,41 @@ void usage(const char* argv0) {
 
 int main(int argc, char** argv) {
     bool run = false, monitor = false, introspect = false, configure = false, video = true, service = false;
+    aa::UsbSelection usbSelection;
+    unsigned usbFields = 0;
+    int usbLockFd = -1;
     const char* inputArg = nullptr;
     unsigned long limitSeconds = 0;
     AlpsBaseline baseline = {nullptr, nullptr, nullptr};
     for (int i = 1; i < argc; ++i) {
         const char* value = i + 1 < argc ? argv[i + 1] : nullptr;
-        if (!strcmp(argv[i], "--input") && value) {
+        if (!strcmp(argv[i], "--usb-port") && value) {
+            usbSelection.port = value;
+            usbFields |= 1;
+            ++i;
+        } else if ((!strcmp(argv[i], "--usb-vid") || !strcmp(argv[i], "--usb-pid")) && value) {
+            unsigned long number = 0;
+            if (!parseNumber(value, 65535, number) || !number) {
+                return 2;
+            }
+            if (!strcmp(argv[i], "--usb-vid")) {
+                usbSelection.vendor = number;
+                usbFields |= 2;
+            } else {
+                usbSelection.product = number;
+                usbFields |= 4;
+            }
+            ++i;
+        } else if (!strcmp(argv[i], "--usb-lock-fd") && value) {
+            unsigned long fd = 0;
+            if (!parseNumber(value, 65535, fd) || fd < 3) {
+                return 2;
+            }
+            usbLockFd = static_cast<int>(fd);
+            ++i;
+        } else if (!strcmp(argv[i], "--usb-adopt-accessory")) {
+            usbSelection.adoptAccessory = true;
+        } else if (!strcmp(argv[i], "--input") && value) {
             inputArg = value;
             ++i;
         } else if (!strcmp(argv[i], "--limit-seconds") && value) {
@@ -137,6 +172,39 @@ int main(int argc, char** argv) {
         usage(argv[0]);
         return 2;
     }
+    const bool usb = usbFields != 0;
+    if ((usb && (usbFields != 7 || !usbSelection.valid() || !run || configure || (!service && !limitSeconds))) ||
+        (!usb && (usbSelection.adoptAccessory || usbLockFd >= 0))) {
+        usage(argv[0]);
+        return 2;
+    }
+    setenv("XDG_RUNTIME_DIR", "/run/system/0", 0);  // read by the Wayland library (picture, volume pill)
+    // USB is an explicit alternative to the wireless service. Keep the same lock and compositor guards, with no
+    // Alps/SPP/Wi-Fi setup or firmware writes. The OS closes this descriptor on every process exit.
+    if (usb) {
+        const int lock = usbLockFd >= 0
+                             ? usbLockFd
+                             : open(evo::contract::kWirelessLock, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+        struct stat st, pathStat;
+        if (lock < 0 || fstat(lock, &st) || lstat(evo::contract::kWirelessLock, &pathStat) || !S_ISREG(st.st_mode) ||
+            !S_ISREG(pathStat.st_mode) || st.st_uid != getuid() || st.st_dev != pathStat.st_dev ||
+            st.st_ino != pathStat.st_ino || flock(lock, LOCK_EX | LOCK_NB)) {
+            ELOG("Main", "another AA service is running, or the service lock is invalid");
+            return 1;
+        }
+        if (access((std::string(evo::contract::kServiceDir) + "/bluetooth-retour.txt").c_str(), F_OK) == 0) {
+            ELOG("Main", "pending wireless Bluetooth restore: finish it before USB testing");
+            return 1;
+        }
+        if (video) {
+            evo::EvoIlm ilm;
+            bool topFirst = false;
+            if (!ilm.validateTarget(evo::kAaSurfaceId, evo::kAaLayerId, 1280, 480) ||
+                !ilm.renderOrderTopFirst(topFirst)) {
+                return 1;
+            }
+        }
+    }
     aa::installProcessGuards();
     // A crash must not leave an Android Auto arrow on the cluster: cancelled after the crash line is logged.
     aa::setFatalHook(evo::kombi::Arrows::onFatalSignal);
@@ -170,12 +238,11 @@ int main(int argc, char** argv) {
         ELOG("Main", "invalid --input (forward, observe or off)");
         return 2;
     }
-    if (service && limitSeconds) {
+    if (!usb && service && limitSeconds) {
         ELOG("Main", "--service and --limit-seconds cannot be combined");
         return 2;
     }
-    const bool guarded = limitSeconds || service;   // Alps baseline/child snapshot checks
-    setenv("XDG_RUNTIME_DIR", "/run/system/0", 0);  // read by the Wayland library (picture, volume pill)
+    const bool guarded = limitSeconds || service;  // Alps baseline/child snapshot checks
     evo::ServiceApp app(kAaPort, video, &quit);
     app.session.setTouchForwarding(input == evo::INPUT_FORWARD);
     app.session.setVehicleFile(evo::contract::kVehicle);  // the car's model and year, written at installation
@@ -185,14 +252,18 @@ int main(int argc, char** argv) {
     evo::EvoKnob knob;
     evo::EvoControl control;
     std::string source;
-    if (!evo::loadAccessPoint(app.ap, source)) {
+    if (!usb && !evo::loadAccessPoint(app.ap, source)) {
         ELOG("Main", "car hotspot (wlan0) or its credentials unavailable");
         return 1;
     }
-    app.server.setHotspotAddress(app.ap.ip);  // listening address and the subnet a phone must come from
-    ELOG("Main", "access point read from %s; TCP %s:%u; media over the BMW Bluetooth source", source.c_str(),
-         app.ap.ip.c_str(), static_cast<unsigned>(kAaPort));
-    app.server.setConnectionCallback(evo::ServiceApp::connected, &app);
+    if (!usb) {
+        app.server.setHotspotAddress(app.ap.ip);  // listening address and the subnet a phone must come from
+        ELOG("Main", "access point read from %s; TCP %s:%u; media over the BMW Bluetooth source", source.c_str(),
+             app.ap.ip.c_str(), static_cast<unsigned>(kAaPort));
+        app.server.setConnectionCallback(evo::ServiceApp::connected, &app);
+    } else {
+        ELOG("Main", "USB-only projection; BMW Bluetooth audio retained; phone hotspot unchanged");
+    }
     app.session.setDisconnectCallback(evo::ServiceApp::ended, &app);
     app.session.setVideoFrameCallback(evo::ServiceApp::frame, &app);
     app.session.setCodecConfigCallback(evo::ServiceApp::codec, &app);
@@ -205,11 +276,11 @@ int main(int argc, char** argv) {
     evo::CarGpsFeed gpsFeed;
     gpsFeed.logSource();
     app.session.postCarLocation(carGps.poll(aa::locationClockMs()));
-    if (!app.server.start()) {
+    if (!usb && !app.server.start()) {
         return 1;
     }
     evo::SppSnapshotReader alpsReader;
-    if (guarded && (!alpsReader.open() || !alpsReady(alpsReader, instance, baseline))) {
+    if (!usb && guarded && (!alpsReader.open() || !alpsReady(alpsReader, instance, baseline))) {
         return 1;
     }
     if (input != evo::INPUT_OFF) {
@@ -220,33 +291,38 @@ int main(int argc, char** argv) {
         !control.start(evo::contract::kControlPort, evo::contract::kStateFile, evo::ServiceApp::command, &app)) {
         return 1;
     }
-    if (quit || !app.bt.start(instance) || !app.bt.ensureDataInterface(configure, 2000)) {
-        ELOG("Main", "SPP HLI not confirmed: check 0x6203 and the instance; no UUID registered");
-        return 1;
-    }
-    ELOG("Main", "SPP interface %u confirmed: 0x6203=1", instance);
-    if (quit || (guarded && !alpsReady(alpsReader, instance, baseline))) {
-        return 1;
-    }
-    int status = app.bt.registerUuid(evo::kAaUuid, 3000);
-    if (status != 0) {
-        ELOG("Main", "UUID registration failed (%d)", status);
-        app.server.stop();
-        app.session.stop();
-        return 1;
-    }
-    if (guarded) {
-        evo::SppSlotSnapshot advertised;
-        if (!alpsReader.read(instance, advertised) || advertised.uuidPayload != evo::androidAutoPair() ||
-            advertised.transportUuidPayload != advertised.uuidPayload) {
-            ELOG("Main", "Android Auto UUIDs not read back from Alps: stopping so that Bluetooth is restored");
+    if (!usb) {
+        if (quit || !app.bt.start(instance) || !app.bt.ensureDataInterface(configure, 2000)) {
+            ELOG("Main", "SPP HLI not confirmed: check 0x6203 and the instance; no UUID registered");
             return 1;
         }
+        ELOG("Main", "SPP interface %u confirmed: 0x6203=1", instance);
+        if (quit || (guarded && !alpsReady(alpsReader, instance, baseline))) {
+            return 1;
+        }
+        int status = app.bt.registerUuid(evo::kAaUuid, 3000);
+        if (status != 0) {
+            ELOG("Main", "UUID registration failed (%d)", status);
+            app.server.stop();
+            app.session.stop();
+            return 1;
+        }
+        if (guarded) {
+            evo::SppSlotSnapshot advertised;
+            if (!alpsReader.read(instance, advertised) || advertised.uuidPayload != evo::androidAutoPair() ||
+                advertised.transportUuidPayload != advertised.uuidPayload) {
+                ELOG("Main", "Android Auto UUIDs not read back from Alps: stopping so that Bluetooth is restored");
+                return 1;
+            }
+        }
+        ELOG("Main", "AA_SERVICE_READY: registration confirmed; waiting for the phone's Bluetooth link");
+        ELOG("Main",
+             "No Android Auto request? Turn the phone's Bluetooth off and on, then reconnect to the BMW without "
+             "removing "
+             "the pairing.");
+    } else {
+        ELOG("Main", "AA_SERVICE_READY: USB selected; waiting on the configured physical port");
     }
-    ELOG("Main", "AA_SERVICE_READY: registration confirmed; waiting for the phone's Bluetooth link");
-    ELOG("Main",
-         "No Android Auto request? Turn the phone's Bluetooth off and on, then reconnect to the BMW without removing "
-         "the pairing.");
     if (input != evo::INPUT_OFF) {
         ELOG("Main",
              "inputs %s: touchscreen UDP 30567 and controller vMOST E5 (nothing sent to iDrive or the controller)",
@@ -282,13 +358,16 @@ int main(int argc, char** argv) {
         }
     }
     app.markReady();
-    pthread_t wireless;
-    if (pthread_create(&wireless, nullptr, evo::ServiceApp::wireless, &app) != 0) {
+    pthread_t wireless = 0;
+    if (!usb && pthread_create(&wireless, nullptr, evo::ServiceApp::wireless, &app) != 0) {
         app.server.stop();
         app.session.stop();
         return 1;
     }
     bool failed = false;
+    aa::UsbRetryBudget usbBudget;
+    uint32_t lastUsbAttempt = evo::monoMs() - 1000;
+    unsigned knownAccessoryBus = 0, knownAccessoryAddress = 0;
     const uint32_t startedMs = evo::monoMs();
     evo::AdvertisementSchedule advertisement(service ? 60000 : 0);
     while (!quit) {
@@ -312,17 +391,42 @@ int main(int argc, char** argv) {
         if (failed) {
             break;
         }
-        if (guarded && turn.idleForAdvert && advertisement.due(evo::monoMs() - startedMs)) {
+        if (!usb && guarded && turn.idleForAdvert && advertisement.due(evo::monoMs() - startedMs)) {
             failed = !app.refreshAdvertisementIfIdle(service, alpsReader);
             if (failed) {
                 break;
+            }
+        }
+        if (usb && !turn.active && evo::monoMs() - lastUsbAttempt >= 1000) {
+            lastUsbAttempt = evo::monoMs();
+            aa::UsbIdentity id;
+            if (aa::readUsbIdentity(usbSelection, id) &&
+                ((id.vendor == usbSelection.vendor && id.product == usbSelection.product) ||
+                 (id.accessory() && (usbSelection.adoptAccessory ||
+                                     (knownAccessoryBus == id.bus && knownAccessoryAddress == id.address)))) &&
+                usbBudget.take(id)) {
+                aa::UsbSelection selection = usbSelection;
+                selection.adoptAccessory =
+                    selection.adoptAccessory || (knownAccessoryBus == id.bus && knownAccessoryAddress == id.address);
+                aa::Transport* stream = aa::connectUsb(selection, &quit, aa::libusbBackend());
+                if (stream) {
+                    aa::UsbIdentity accessory;
+                    if (aa::readUsbIdentity(selection, accessory) && accessory.accessory()) {
+                        usbBudget.followReenumeration(accessory);
+                        knownAccessoryBus = accessory.bus;
+                        knownAccessoryAddress = accessory.address;
+                    }
+                    evo::ServiceApp::connectedTransport(stream, &app);
+                }
             }
         }
         usleep(100000);
     }
     app.requestStop();
     app.bt.interruptLink();
-    pthread_join(wireless, nullptr);
+    if (!usb) {
+        pthread_join(wireless, nullptr);
+    }
     touch.setOwned(false);
     knob.setOwned(false);
     touch.stop();
@@ -340,10 +444,10 @@ int main(int argc, char** argv) {
     bool firstFrame = app.video.firstFrameSeen();
     ELOG("Main",
          "summary: spp_links=%u wpp_reply=%u wifi_accepted=%u tcp_connections=%u h264_frames=%u "
-         "compositor_frame_callback=%u",
+         "usb_connections=%u compositor_frame_callback=%u",
          app.sppLinks, app.wppReply ? 1 : 0, app.wppAccepted ? 1 : 0, app.tcpLinks, app.videoFrames.load(),
-         firstFrame ? 1 : 0);
-    if (!firstFrame && limitSeconds) {
+         app.usbLinks, firstFrame ? 1 : 0);
+    if (video && !firstFrame && limitSeconds) {
         ELOG("Main", "summary: NO FRAME CALLBACK FROM THE COMPOSITOR; see the steps above");
     }
     return failed ? 1 : (limitSeconds && video && !firstFrame ? 2 : 0);

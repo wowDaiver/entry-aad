@@ -2,8 +2,8 @@
 
 # entry-aad
 
-**Android Auto sans fil dans l'iDrive des BMW équipées d'une unité EntryNav2.**<br>
-Sans boîtier, sans câble USB, sans remplacer aucun fichier BMW.
+**Android Auto sans fil ou USB dans l'iDrive des BMW équipées d'une unité EntryNav2.**<br>
+Sans boîtier, sans remplacer aucun fichier BMW.
 
 [![CI](https://github.com/Jiraiya43/entry-aad/actions/workflows/ci.yml/badge.svg)](https://github.com/Jiraiya43/entry-aad/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/release/Jiraiya43/entry-aad?include_prereleases&sort=semver&label=version)](https://github.com/Jiraiya43/entry-aad/releases)
@@ -22,6 +22,8 @@ Sans boîtier, sans câble USB, sans remplacer aucun fichier BMW.
 
 - **Android Auto sans fil** : le téléphone s'appaire en Bluetooth, puis rejoint le Wi-Fi de la voiture, celui de
   CarPlay.
+- **USB facultatif** : un port configuré est prioritaire au démarrage si le téléphone y est présent ; sinon, sans fil.
+  Les changements de câble prennent effet après Arrêter/Démarrer. Voir [configuration et limites USB](docs/USB.md).
 - **Lancement depuis l'iDrive** : ligne *Android Auto* dans le menu Media, avec son menu (Démarrer, Arrêter, démarrage
   automatique, aide).
 - **Commandes d'origine** : molette, touches, écran tactile, boutons du volant, bouton vocal vers l'Assistant.

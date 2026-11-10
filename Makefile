@@ -29,20 +29,22 @@ LDSHLIB   = -Wl,--allow-shlib-undefined $(LIBDIRS) $(RPATHLINK)
 
 PLATFORM_SRC = platform/omap_dmabuf.cpp platform/evo_ilm.cpp platform/evo_video.cpp platform/evo_process.cpp
 PLATFORM_OBJ = $(PLATFORM_SRC:.cpp=.o)
-CORE_SRC = core/aa_session.cpp core/aa_channels.cpp core/aa_messages.cpp core/car_inbox.cpp core/aa_frame.cpp \
+CORE_SRC = core/usb_transport.cpp core/aa_transport.cpp core/aa_session.cpp core/aa_channels.cpp core/aa_messages.cpp \
+           core/car_inbox.cpp core/aa_frame.cpp \
            core/aa_tls.cpp core/tcp_server.cpp core/sdr_builder.cpp core/wireless_setup.cpp core/crash_handler.cpp
 CORE_OBJ = $(CORE_SRC:.cpp=.o)
 # The cluster guidance (platform/kombi_*), in the service and in its tests.
 KOMBI_SRC = platform/kombi_phone.cpp platform/kombi_display.cpp platform/kombi_someip.cpp platform/kombi_graph.cpp \
             platform/kombi_client.cpp platform/kombi_guide.cpp platform/kombi_nav.cpp
 KOMBI_OBJ = $(KOMBI_SRC:.cpp=.o)
-DAEMON_SRC = platform/alps_spp.cpp platform/alps_spp_codec.cpp platform/evo_ap.cpp \
+DAEMON_SRC = core/usb_libusb.cpp platform/alps_spp.cpp platform/alps_spp_codec.cpp platform/evo_ap.cpp \
              platform/evo_ap_config.cpp platform/evo_spp_snapshot.cpp platform/evo_touch.cpp platform/evo_knob.cpp \
              platform/vmost_client.cpp platform/evo_control.cpp platform/evo_sdr_sensors.cpp platform/evo_mic.cpp \
              $(KOMBI_SRC) platform/evo_bmw_guidance.cpp platform/evo_pill.cpp \
              platform/peek_timing.cpp platform/wireless_loop.cpp platform/service_app.cpp platform/main.cpp
 DAEMON_OBJ = $(CORE_OBJ) $(DAEMON_SRC:.cpp=.o)
-SUPERVISOR_OBJ = tools/aa_supervisor.o platform/evo_spp_snapshot.o platform/alps_spp.o platform/alps_spp_codec.o \
+SUPERVISOR_OBJ = platform/transport_policy.o core/usb_transport.o tools/aa_supervisor.o platform/evo_spp_snapshot.o \
+                 platform/alps_spp.o platform/alps_spp_codec.o \
             platform/evo_ilm.o platform/evo_process.o platform/evo_ap.o platform/evo_ap_config.o platform/evo_wlan.o \
             platform/vmost_client.o
 CHECK_OBJ = tools/evo_check.o platform/alps_spp.o platform/alps_spp_codec.o platform/evo_process.o
@@ -59,7 +61,7 @@ VIDEO_LIBS = -l:libxsvideo.so.4 -l:libdrm_omap.so.1 -l:libdrm.so.2 -lpthread -lr
         tests/evo-check-host test-arm-all test-pb-arm-build test-sdr-arm-build test-kombi-arm-build \
         test-session-silence-arm-build test-presentation-arm-build test-wireless-lifecycle-arm-build \
         test-gps-arm-build test-supervisor-arm-build test-hmiapp-arm-build test-spawn-arm-build test-lm-cli-arm-build \
-        test-phone-arm-build
+        test-phone-arm-build test-usb-host test-usb-arm-build
 all: daemon aa-supervisor hmiapp
 
 %.o: %.cpp
@@ -134,12 +136,12 @@ tests/evo-check-host:
 	$(HOST_CXX) $(HOST_FLAGS) tools/evo_check.cpp platform/alps_spp.cpp platform/alps_spp_codec.cpp \
 	    platform/evo_process.cpp $(HOST_DBUS) -o $@
 
-test-host: test-parsers test-spp-host test-kombi-host test-gps-host test-capture-host tests/evo-check-host
+test-host: test-usb-host test-parsers test-spp-host test-kombi-host test-gps-host test-capture-host tests/evo-check-host
 	$(HOST_CXX) $(HOST_FLAGS) tests/test_evo_elf.cpp -o tests/test-evo-elf
 	if [ -f "$(SPP_FIXTURE_LIB)" ]; then ENTRY_AAD_FIXTURE_LIB="$(SPP_FIXTURE_LIB)" ./tests/test-evo-elf; else ./tests/test-evo-elf; fi
 	$(HOST_CXX) $(HOST_FLAGS) tests/test_spp_snapshot.cpp platform/evo_spp_snapshot.cpp -o tests/test-spp-snapshot
 	if [ -f "$(SPP_FIXTURE_LIB)" ]; then ENTRY_AAD_FIXTURE_LIB="$(SPP_FIXTURE_LIB)" ./tests/test-spp-snapshot; else echo "SKIP test-spp-snapshot: no copy of the car system"; fi
-	$(HOST_CXX) $(HOST_FLAGS) tests/test_supervisor.cpp platform/alps_spp_codec.cpp -o tests/test-supervisor
+	$(HOST_CXX) $(HOST_FLAGS) tests/test_supervisor.cpp platform/alps_spp_codec.cpp core/usb_transport.cpp platform/transport_policy.cpp -o tests/test-supervisor
 	./tests/test-supervisor
 	$(HOST_CXX) $(HOST_FLAGS) tests/test_evo_ilm.cpp platform/evo_ilm.cpp platform/evo_process.cpp -o tests/test-evo-ilm
 	ENTRY_AAD_DIAGNOSTIC=./tests/evo-check-host ./tests/test-evo-ilm
@@ -180,6 +182,10 @@ test-host: test-parsers test-spp-host test-kombi-host test-gps-host test-capture
 	$(HOST_CXX) $(HOST_FLAGS) $(HOST_SSL_FLAGS) -Icore/include tests/test_session_phone.cpp $(SESSION_SRC) -lssl -lcrypto \
 	    -o tests/test-session-phone
 	./tests/test-session-phone tests/fixtures/session_phone.golden
+	./tests/test-session-phone tests/fixtures/session_phone.golden --usb
+	$(HOST_CXX) $(HOST_FLAGS) $(HOST_SSL_FLAGS) -Icore/include tests/test_usb_session_io.cpp $(SESSION_SRC) -lssl -lcrypto \
+	    -o tests/test-usb-session-io
+	./tests/test-usb-session-io
 	$(HOST_CXX) $(HOST_FLAGS) tests/test_wireless_phone.cpp core/wireless_setup.cpp -o tests/test-wireless-phone
 	./tests/test-wireless-phone tests/fixtures/wireless_phone.golden
 
@@ -227,7 +233,7 @@ test-touch-live:
 
 # ---- ARM tests, run on the PC under QEMU with the car's libraries (tests/run_qemu.py) --------------------------------
 # test-spawn-attr-arm checks how the app starts the service from HmiMain3D with the HU's own glibc 2.15.
-test-arm-all: dev-tools test-pb-arm-build test-sdr-arm-build test-kombi-arm-build test-session-silence-arm-build \
+test-arm-all: test-usb-arm-build dev-tools test-pb-arm-build test-sdr-arm-build test-kombi-arm-build test-session-silence-arm-build \
               test-presentation-arm-build test-wireless-lifecycle-arm-build test-gps-arm-build test-supervisor-arm-build \
               test-hmiapp-arm-build test-spawn-arm-build test-lm-cli-arm-build test-phone-arm-build
 
@@ -251,7 +257,7 @@ test-gps-arm-build:
 test-supervisor-arm-build:
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_spp_snapshot.cpp platform/evo_spp_snapshot.cpp -o tests/test-spp-snapshot-arm $(LDSHLIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_evo_elf.cpp -o tests/test-evo-elf-arm $(LDSHLIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_supervisor.cpp platform/alps_spp_codec.cpp -o tests/test-supervisor-arm $(LDSHLIB) -lrt
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_supervisor.cpp platform/alps_spp_codec.cpp core/usb_transport.cpp platform/transport_policy.cpp -o tests/test-supervisor-arm $(LDSHLIB) -lrt
 
 test-kombi-arm-build: $(KOMBI_OBJ)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_kombi_phone.cpp platform/kombi_phone.o -o tests/test-kombi-phone-arm $(LDSHLIB)
@@ -296,3 +302,24 @@ clean:
 	    tests/test-* tests/evo-check-host tests/*.so
 
 -include $(ARM_OBJ:.o=.d) $(HMI_OBJ:.o=.d)
+
+test-usb-host:
+	$(HOST_CXX) $(HOST_FLAGS) tests/test_usb_transport.cpp core/usb_transport.cpp -o tests/test-usb-transport
+	./tests/test-usb-transport
+	$(HOST_CXX) $(HOST_FLAGS) tests/test_transport_policy.cpp platform/transport_policy.cpp core/usb_transport.cpp \
+	    -o tests/test-transport-policy
+	./tests/test-transport-policy
+	$(HOST_CXX) $(HOST_FLAGS) tests/test_auto_supervisor.cpp platform/transport_policy.cpp core/usb_transport.cpp \
+	    platform/alps_spp_codec.cpp -o tests/test-auto-supervisor
+	./tests/test-auto-supervisor
+
+test-usb-arm-build: $(CORE_OBJ)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_usb_transport.cpp core/usb_transport.o \
+	    -o tests/test-usb-transport-arm $(LDSHLIB) -lpthread -lrt
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_transport_policy.cpp platform/transport_policy.cpp core/usb_transport.o \
+	    -o tests/test-transport-policy-arm $(LDSHLIB) -lpthread -lrt
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_auto_supervisor.cpp platform/transport_policy.cpp core/usb_transport.o \
+	    platform/alps_spp_codec.cpp -o tests/test-auto-supervisor-arm $(LDSHLIB) -lpthread -lrt
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/test_usb_session_io.cpp \
+	    $(filter-out core/wireless_setup.o core/tcp_server.o,$(CORE_OBJ)) \
+	    -o tests/test-usb-session-io-arm $(LDSHLIB) -lpthread -lrt -l:libssl.so.1.0.0 -l:libcrypto.so.1.0.0
