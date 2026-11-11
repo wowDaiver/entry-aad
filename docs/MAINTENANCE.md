@@ -10,8 +10,8 @@ Le service ne lit aucun réglage dans son environnement : ses valeurs sont fixes
 
 | Fichier | Effet |
 |---|---|
-| `usb-phone` | Sélection USB ou automatique au démarrage ; absent : sans fil. Format et limites : [USB](USB.md) |
 | `vehicle` | Modèle et année annoncés au téléphone : `model=…` et `year=…`, une ligne chacun. Sans ce fichier : « iDrive », 2019 |
+| `usb` | Présent : Android Auto par câble USB au lieu du sans-fil (case *Câble USB au lieu du sans-fil* du menu). Vide, ou le nom de la seule prise à surveiller : voir [USB](USB.md) |
 | `autostart` | Présent : Android Auto démarre avec l'iDrive (case *Démarrage automatique* du menu) |
 | `entry-direct` | Présent : la ligne *Android Auto* de l'iDrive ouvre directement Android Auto, au lieu de son menu |
 | `kombi-off` | Présent : rien n'est envoyé au compteur ni à la tête haute |
@@ -44,6 +44,31 @@ Depuis le PC :
 ```sh
 scp root@169.254.1.0:/var/local/data/AA/app.log root@169.254.1.0:/tmp/entry-aa-service.log .
 ```
+
+### Qualité du Wi-Fi
+
+Journaux activés, le service écrit une ligne `[WifiLink]` quand le téléphone se connecte en sans-fil, puis une toutes
+les 10 secondes jusqu'à la fin de la session :
+
+```text
+[WifiLink] 5180 MHz; signal -52 dBm (average -51); to the phone 150.0 Mbit/s; from the phone 135.0 Mbit/s;
+in 10 s: 812 frames sent, 35 retried, 0 lost; on the Wi-Fi for 135 s; TCP round trip 4.2 ms, 0 segment(s) sent again
+```
+
+| Partie | Sens |
+|---|---|
+| `5180 MHz` | Fréquence du Wi-Fi de la voiture : vers 2400, la bande 2,4 GHz, partagée avec le Bluetooth ; vers 5000, la bande 5 GHz |
+| `signal` | Niveau reçu du téléphone, et sa moyenne. Plus le nombre est bas, plus la liaison est fragile (-50 : bon, -80 : faible) |
+| `to the phone`, `from the phone` | Débit radio choisi dans chaque sens |
+| `frames sent, retried, lost` | Trames envoyées au téléphone depuis la ligne précédente, réémises, puis abandonnées |
+| `on the Wi-Fi for` | Temps depuis que le téléphone a rejoint le Wi-Fi. S'il repart de zéro, le téléphone l'a quitté puis rejoint |
+| `TCP round trip`, `sent again` | Temps d'aller-retour de la connexion Android Auto, et morceaux qu'il a fallu renvoyer |
+
+Une partie que le Wi-Fi de la voiture ne donne pas est absente de la ligne. Ces chiffres sont lus dans le noyau, comme
+le fait la commande `iw` : rien n'est réglé ni envoyé, et l'adresse du téléphone n'est pas écrite. Par câble USB, il n'y a
+pas de ligne `[WifiLink]`.
+
+### Effacer les journaux
 
 Pour revenir à zéro journal :
 

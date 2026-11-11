@@ -22,6 +22,7 @@
 //   service_link   the supervisor /opt/aa/aa-supervisor, control messages, the service's state, the stop sequence
 //   car_signals    gear, phone calls, day/night and driving mode from the car's CDS
 //   hold_machine   iDrive kept on the blank state while Android Auto is on screen (pure, tested on the PC)
+//   pending_restart  the restart the USB checkbox asks for while Android Auto runs (pure, tested on the PC)
 // Uninstall: delete the plugin folder and reboot.
 #include <dlfcn.h>
 #include <stdint.h>
@@ -37,6 +38,7 @@
 #include "car_signals.hpp"
 #include "hold_machine.hpp"
 #include "mono_clock.hpp"
+#include "pending_restart.hpp"
 #include "rhmi_ids.hpp"
 #include "service_link.hpp"
 #include "service_state.hpp"
@@ -136,11 +138,13 @@ void setConnectingAnimation(bmw::PluginApp* app, bool on) {
 }
 
 // ---- the entry button and the menu ----------------------------------------------------------------------------------
-bool g_autostartShown = false;
-void showAutostart(bmw::PluginApp* app) {
+bool g_settingsShown = false;
+void showSettings(bmw::PluginApp* app) {
     app->updateModel(kAutostartModel, autostartOn());
-    g_autostartShown = true;
+    app->updateModel(kUsbCableModel, usbCableOn());
+    g_settingsShown = true;
 }
+PendingRestart g_restart;  // the USB checkbox changed while Android Auto ran
 
 bool guardedByOverlay(const char* what) {
     ServiceState d = readServiceState();
@@ -165,6 +169,7 @@ void startServiceOrShow() {
     } else if (d.pid < 0) {
         alog("start: service starting (%s): waiting for it", d.state);
     } else {
+        g_restart.cancel();
         launchService();
     }
 }
@@ -188,6 +193,7 @@ bool onStartRow(void*, const bmw::Parcel&) {
 
 bool onStopRow(void*, const bmw::Parcel&) {
     alog("menu: Stop (raAction %u)", kActStop);
+    g_restart.cancel();  // stopped by hand: it stays stopped
     if (stopInProgress() || guardedByOverlay("stop")) {
         return true;
     }
@@ -217,13 +223,35 @@ bool onEntry(void* self, const bmw::Parcel&) {
 bool onAutostartToggle(void*, const bmw::Parcel&) {
     if (guardedByOverlay("start automatically")) {
         if (g_runApp) {
-            showAutostart(g_runApp);  // the checkbox flipped on screen: show the unchanged setting again
+            showSettings(g_runApp);  // the checkbox flipped on screen: show the unchanged setting again
         }
         return true;
     }
     toggleAutostart();
     if (g_runApp) {
-        showAutostart(g_runApp);
+        showSettings(g_runApp);
+    }
+    return true;
+}
+
+// Wireless or USB cable: chosen here and nowhere else, never guessed from what is plugged in (a passenger's
+// phone on charge must not take Android Auto over). The service reads the choice at its start: one that runs is
+// stopped, and started again by the status poll once nothing of it is left.
+bool onUsbCableToggle(void*, const bmw::Parcel&) {
+    if (!guardedByOverlay("USB cable")) {
+        toggleUsbCable();
+        if (stopInProgress()) {
+            if (g_restart.asked()) {
+                g_restart.ask(monoSeconds());  // changed again during its own restart
+            }
+        } else if (readServiceState().pid != 0) {
+            alog("menu: link changed while Android Auto runs: stopping it, then starting it again");
+            beginStop();
+            g_restart.ask(monoSeconds());
+        }
+    }
+    if (g_runApp) {
+        showSettings(g_runApp);  // the setting as it is now, changed or not
     }
     return true;
 }
@@ -238,11 +266,24 @@ void statusRun(void*) {
     if (!app) {
         return;
     }
-    if (!g_autostartShown) {
-        showAutostart(app);
+    if (!g_settingsShown) {
+        showSettings(app);
     }
     resetGuardsWhenStable(g_initTime);
     serviceStop();
+    if (g_restart.asked()) {
+        const bool busy = stopInProgress() || readServiceState().pid != 0 || supervisorRunning();
+        const PendingRestart::Turn restart = g_restart.turn(monoSeconds(), busy);
+        if (restart == PendingRestart::kStart) {
+            alog("link changed: Android Auto has stopped, starting it again over %s",
+                 usbCableOn() ? "the USB cable" : "wireless");
+            forgetBootGuard();
+            launchService();
+        } else if (restart == PendingRestart::kGiveUp) {
+            alog("link changed: Android Auto still there after %ld s, not started again (Start in the menu)",
+                 kRestartGiveUpS);
+        }
+    }
     serviceAutostart(g_initTime);
     ServiceState d = readServiceState();
     bool connecting = !strcmp(d.state, "connecting"), connected = !strcmp(d.state, "connected");
@@ -291,14 +332,15 @@ bool appOnInit(bmw::PluginApp* self) {
     addAction(self, kActStop, &onStopRow);
     addAction(self, kActEntry, &onEntry);
     addAction(self, kActAutostart, &onAutostartToggle);
+    addAction(self, kActUsbCable, &onUsbCableToggle);
     addStateHandler(self, kMenuState, kHandlerFocus, &onMenuFocus);
     addStateHandler(self, kHelpState, kHandlerFocus, &onHelpFocus);
     addStateHandler(self, kAaState, kHandlerFocus, &onAaFocus);
     addStateHandler(self, kAaState, kHandlerVisible, &onAaVisible);
     g_initTime = time(nullptr);
     bool ok = self->onInit();
-    alog("onInit: handlers registered, base onInit -> %d, start automatically %s", static_cast<int>(ok),
-         autostartOn() ? "on" : "off");
+    alog("onInit: handlers registered, base onInit -> %d, start automatically %s, USB cable %s", static_cast<int>(ok),
+         autostartOn() ? "on" : "off", usbCableOn() ? "on" : "off");
     g_runApp = self;
     makeRunnable(g_subRunnable, &subscribeRun);
     postRunnable(self, g_subRunnable, 1500);

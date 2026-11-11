@@ -336,17 +336,18 @@ void ServiceApp::ended(void* user) {
 }
 
 void ServiceApp::connected(int fd, void* user) {
-    connectedTransport(aa::socketTransport(fd), user);
+    static_cast<ServiceApp*>(user)->startProjection(fd, false);
 }
 
-void ServiceApp::connectedTransport(aa::Transport* transport, void* user) {
-    if (!transport) {
-        return;
-    }
-    ServiceApp* a = static_cast<ServiceApp*>(user);
+void ServiceApp::usbPhoneReady(int fd) {
+    startProjection(fd, true);
+}
+
+void ServiceApp::startProjection(int fd, bool overUsb) {
+    ServiceApp* a = this;
     pthread_mutex_lock(&a->connectMu);
     if (a->stopRequested()) {
-        delete transport;
+        close(fd);
         pthread_mutex_unlock(&a->connectMu);
         return;
     }
@@ -354,20 +355,16 @@ void ServiceApp::connectedTransport(aa::Transport* transport, void* user) {
     bool ready = a->ready;
     pthread_mutex_unlock(&a->mu);
     if (!ready) {
-        delete transport;
+        close(fd);
         a->server.notifySessionEnded();
         pthread_mutex_unlock(&a->connectMu);
         return;
     }
     pthread_mutex_lock(&a->mu);
-    if (!strcmp(transport->name(), "USB/AOA")) {
-        ++a->usbLinks;
-    } else {
-        ++a->tcpLinks;
-    }
+    ++(overUsb ? a->usbLinks : a->tcpLinks);
     a->tcpPreparing = true;
     pthread_mutex_unlock(&a->mu);
-    ELOG("ServiceApp", "phone transport connection received; preparing the video and the AA session");
+    ELOG("ServiceApp", "phone %s connection received; preparing the video and the AA session", overUsb ? "USB" : "TCP");
     a->session.stop();  // join callbacks before destroying/reinitializing video buffers
     bool videoOk = true;
     if (a->videoEnabled) {
@@ -378,7 +375,7 @@ void ServiceApp::connectedTransport(aa::Transport* transport, void* user) {
     }
     pthread_mutex_lock(&a->mu);
     if (!videoOk) {
-        delete transport;
+        close(fd);
         a->server.notifySessionEnded();
         a->tcpPreparing = false;
         pthread_mutex_unlock(&a->mu);
@@ -387,8 +384,11 @@ void ServiceApp::connectedTransport(aa::Transport* transport, void* user) {
     }
     a->focus = true;
     pthread_mutex_unlock(&a->mu);
-    if (!a->session.start(transport)) {
-        a->server.notifySessionEnded();  // start owns/cleans transport even on failure
+    if (!overUsb) {
+        a->wifiLink.connected(fd);  // before the session owns fd
+    }
+    if (!a->session.start(fd)) {
+        a->server.notifySessionEnded();  // start owns/cleans fd even on failure
     } else {
         a->server.markSessionActive();
         if (!a->session.isActive()) {
@@ -399,6 +399,17 @@ void ServiceApp::connectedTransport(aa::Transport* transport, void* user) {
     a->tcpPreparing = false;
     pthread_mutex_unlock(&a->mu);
     pthread_mutex_unlock(&a->connectMu);
+}
+
+void* ServiceApp::usb(void* user) {
+    ServiceApp* a = static_cast<ServiceApp*>(user);
+    UsbLoopSetup setup;
+    setup.port = a->usbPort;
+    runUsbLoop(setup, *a);
+    pthread_mutex_lock(&a->mu);
+    a->wirelessDone = true;
+    pthread_mutex_unlock(&a->mu);
+    return nullptr;
 }
 
 void* ServiceApp::wireless(void* user) {

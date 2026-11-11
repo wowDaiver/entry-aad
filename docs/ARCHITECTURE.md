@@ -51,6 +51,8 @@ Le protocole Android Auto côté voiture, sans rien de propre à BMW.
 | `service_app` | Le service en marche : réactions à la session, à la vidéo, aux entrées et aux commandes de l'appli |
 | `peek_timing` | Quand effacer l'image d'Android Auto : volume, fenêtres de l'iDrive, mode de conduite, touches (testé sur PC) |
 | `wireless_loop` | Boucle d'attente du téléphone en Bluetooth, puis de sa connexion Wi-Fi |
+| `usb_loop`, `usb_accessory` | Mode USB : repère un téléphone Android sur les prises, le passe en mode accessoire |
+| `usb_bridge`, `usb_devfs` | Mode USB : pont entre le téléphone (usbfs du noyau) et la session, par un socket local |
 | `service_contract.hpp` | Chemins et port partagés par l'appli iDrive, le superviseur et le service |
 | `evo_video`, `evo_ilm`, `omap_dmabuf` | Décodage et affichage de la vidéo, gestion de sa couche |
 | `evo_pill`, `volume_pill.hpp` | Pastille du volume au-dessus d'Android Auto : client Wayland, dessin |
@@ -60,6 +62,7 @@ Le protocole Android Auto côté voiture, sans rien de propre à BMW.
 | `evo_gps` | Lecture passive du GPS de la voiture |
 | `evo_mic` | Micro de la voiture pour l'Assistant |
 | `evo_wlan`, `evo_ap` | Wi-Fi de la voiture, allumé comme le fait CarPlay |
+| `wifi_link` | Qualité de la liaison Wi-Fi avec le téléphone, lue dans le noyau pour les journaux (testé sur PC) |
 | `alps_spp`, `evo_spp_snapshot` | Pile Bluetooth de la voiture : commandes, et lecture de son état en mémoire |
 | `evo_elf.hpp` | Symboles exportés par une bibliothèque de la voiture, lus dans son fichier |
 | `evo_control` | Commandes de l'appli vers le service |
@@ -79,6 +82,7 @@ Le protocole Android Auto côté voiture, sans rien de propre à BMW.
 | `entry_aa_app.cpp` | L'appli elle-même : création, menu, bouton d'entrée, relevé d'état chaque seconde |
 | `bmw_framework` | Déclarations de l'interface BMW des applis, accroches de la table virtuelle |
 | `hold_machine` | Quand demander la page vide de l'iDrive sous Android Auto (classe pure, testée sur PC) |
+| `pending_restart.hpp` | Redémarrage d'Android Auto quand la case du câble USB change en marche (testé sur PC) |
 | `service_link` | Lancement du superviseur, commandes UDP au service, arrêt |
 | `car_signals` | Marche arrière, appels, jour et nuit, mode de conduite, lus dans l'iDrive |
 | `app_guards` | Interrupteur, garde-fou contre les plantages, démarrage automatique |
@@ -106,6 +110,8 @@ Le protocole Android Auto côté voiture, sans rien de propre à BMW.
 | `tests/test_wireless_phone.cpp` | Échange Bluetooth du Wi-Fi, octet par octet, comparé à un relevé figé |
 | `tests/test_kombi_golden.cpp` | Chaque trame envoyée au compteur, octet par octet, comparée à un relevé figé |
 | `tests/test_peek_timing.cpp`, `tests/test_wireless_lifecycle.cpp` | Effacement de l'image, cycle de vie Bluetooth puis Wi-Fi du service |
+| `tests/test_wifi_link.cpp` | Qualité du Wi-Fi : messages du noyau, ligne de journal, connexion rendue en fin de session |
+| `tests/test_pending_restart.cpp` | Redémarrage d'Android Auto quand la case du câble USB change en marche |
 | `tests/test_hold_machine.cpp` | Page vide de l'iDrive : ouverture, démarrage automatique, fenêtres, modes, appels, touches |
 | `tests/test_aa_frame.cpp`, `tests/test_aa_messages.cpp`, `tests/test_tcp_server.cpp` | Trames hostiles, messages construits, écoute TCP |
 | `make verify_binary verify_wireless` | Programmes ARM : bibliothèques résolues sur la voiture, empreintes des programmes validés |

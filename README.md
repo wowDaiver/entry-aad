@@ -2,8 +2,8 @@
 
 # entry-aad
 
-**Android Auto for BMW iDrive on the EntryNav2 head unit: wireless or USB.**<br>
-No dongle, no BMW file replaced.
+**Wireless Android Auto for BMW iDrive on the EntryNav2 head unit.**<br>
+No dongle, no cable needed, no BMW file replaced.
 
 [![CI](https://github.com/Jiraiya43/entry-aad/actions/workflows/ci.yml/badge.svg)](https://github.com/Jiraiya43/entry-aad/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Jiraiya43/entry-aad?include_prereleases&sort=semver)](https://github.com/Jiraiya43/entry-aad/releases)
@@ -20,8 +20,8 @@ English · [Français](README.fr.md)
 ## Features
 
 - **Wireless Android Auto.** The phone pairs over Bluetooth, then joins the car's own Wi-Fi (the one CarPlay uses).
-- **Optional wired Android Auto.** A configured USB port takes priority at startup; without the phone, use wireless.
-  Cable changes apply after Stop/Start. See [USB setup and limits](docs/USB.md) (French).
+- **A USB cable works too** (experimental, off by default), for phones without wireless Android Auto: a checkbox in
+  the menu picks the cable or wireless, nothing is guessed. [Setup and limits](docs/USB.md) (in French).
 - **Started from iDrive.** An *Android Auto* entry in the Media menu, with its own menu: start, stop, start
   automatically, help.
 - **Original controls.** iDrive controller, hard keys, touch screen, steering wheel buttons, voice button for the

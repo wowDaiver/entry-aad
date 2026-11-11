@@ -13,7 +13,7 @@ La **voiture de référence** est celle sur laquelle le projet est développé e
 
 | Voiture | Logiciel (`/etc/version`) | Contrôle de compatibilité | Dernière version essayée | Fonctions essayées |
 |---|---|---|---|---|
-| G20 de 2019 (référence) | `202111011321` | pas encore essayé en voiture | 0.10.0 | celles du [README](../README.fr.md#ce-que-ça-fait), limites dans la [feuille de route](../ROADMAP.md#limites-connues) |
+| G20 de 2019 (référence) | `202111011321` | pas encore essayé en voiture | 0.12.0-rc.1 | celles du [README](../README.fr.md#ce-que-ça-fait), limites dans la [feuille de route](../ROADMAP.md#limites-connues) |
 
 Chaque nouvelle voiture s'ajoute ici, avec son rapport de compatibilité ([ticket « Compatibility report »](https://github.com/Jiraiya43/entry-aad/issues/new/choose)).
 

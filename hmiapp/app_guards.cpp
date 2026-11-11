@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -29,6 +30,25 @@ bool g_autostartDone = false, g_stableMarked = false;
 bool fileExists(const char* p) {
     struct stat st;
     return stat(p, &st) == 0;
+}
+
+// A setting that is a file: there or not. content: what a new file holds.
+void setSwitch(const char* what, const char* path, bool on, const char* content) {
+    if (!on) {
+        if (unlink(path) != 0 && errno != ENOENT) {
+            alog("%s: cannot remove %s (errno %d)", what, path, errno);
+        }
+        return;
+    }
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        alog("%s: cannot create %s (errno %d)", what, path, errno);
+        return;
+    }
+    ssize_t w = write(fd, content, strlen(content));
+    (void)w;
+    fsync(fd);
+    close(fd);
 }
 
 bool bootGuardAllows() {
@@ -143,22 +163,18 @@ bool autostartOn() {
 
 void toggleAutostart() {
     bool on = autostartOn();
-    if (on) {
-        if (unlink(contract::kAutostart) != 0) {
-            alog("autostart: cannot remove %s (errno %d)", contract::kAutostart, errno);
-        }
-    } else {
-        int fd = open(contract::kAutostart, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-        if (fd < 0) {
-            alog("autostart: cannot create %s (errno %d)", contract::kAutostart, errno);
-        } else {
-            ssize_t w = write(fd, "1\n", 2);
-            (void)w;
-            fsync(fd);
-            close(fd);
-        }
-    }
+    setSwitch("autostart", contract::kAutostart, !on, "1\n");
     alog("menu: start automatically %s -> %s", on ? "on" : "off", autostartOn() ? "on" : "off");
+}
+
+bool usbCableOn() {
+    return fileExists(contract::kUsb);
+}
+
+void toggleUsbCable() {
+    bool on = usbCableOn();
+    setSwitch("USB cable", contract::kUsb, !on, "");  // empty: every USB port, as `touch` leaves it
+    alog("menu: USB cable %s -> %s", on ? "on" : "off", usbCableOn() ? "on" : "off");
 }
 
 }  // namespace app

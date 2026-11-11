@@ -30,9 +30,10 @@ git config core.hooksPath .githooks
 
 ## Sécurité de la voiture
 
-- Sans fil par défaut ; USB facultatif sur un port explicitement choisi. Ne jamais détacher un propriétaire USB BMW,
-  réinitialiser son périphérique ou redémarrer un service BMW pour prendre une interface. Le Bluetooth emprunté par le
-  mode sans fil est toujours rendu à l'iDrive à l'arrêt.
+- Sans fil par défaut ; par câble USB seulement avec le fichier `usb`, que pose la case du menu : le mode n'est
+  jamais déduit de ce qui est branché. Le Bluetooth est toujours rendu à l'iDrive à l'arrêt.
+- USB : seul un téléphone Android reçoit des requêtes ou une réinitialisation. Jamais d'interface prise à un pilote
+  ou à un programme BMW.
 - Aucun service BMW redémarré tout seul, aucun fichier BMW modifié. Deux dossiers ajoutés, toujours retirables.
 - Toute nouvelle écriture sur le réseau de la voiture est annoncée dans le CHANGELOG et dans la procédure d'installation.
 - Le contrôle de compatibilité n'écrit rien sur la mémoire flash : seulement dans `/tmp`.

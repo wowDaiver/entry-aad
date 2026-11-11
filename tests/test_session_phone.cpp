@@ -29,24 +29,10 @@
 #include <vector>
 
 #include "aa_session.hpp"
-#include "fake_usb_backend.hpp"
 
 namespace {
 
 typedef std::vector<uint8_t> Bytes;
-
-bool g_usbTransport = false;
-bool startSession(aa::AASession& session, int fd) {
-    if (!g_usbTransport) {
-        return session.start(fd);
-    }
-    static FakeUsbTree tree;
-    static FakeUsbStats stats;
-    tree.identity(true);
-    aa::Transport* stream =
-        aa::connectUsb(tree.selection(true), nullptr, new FakeUsbBackend(tree, stats, fd), tree.root.c_str());
-    return stream && session.start(stream);
-}
 
 // Throwaway identity of the fake phone (RSA 2048, self-signed). The head unit does not check it.
 const char* const kPhoneCert =
@@ -528,7 +514,7 @@ struct Link {
         }
         watch(session, touch);
         phoneFd = fds[1];
-        if (!startSession(session, fds[0])) {
+        if (!session.start(fds[0])) {
             fprintf(stderr, "FAIL session start\n");
             exit(1);
         }
@@ -935,11 +921,11 @@ void lifecycle(std::vector<std::string>& log) {
     {
         aa::AASession session;
         watch(session, true);
-        startSession(session, a[0]);
+        session.start(a[0]);
         Phone first(a[1], log);
         first.handshake();
         log.push_back("-- start again while the session runs");
-        startSession(session, b[0]);
+        session.start(b[0]);
         first.untilClosed();
         Phone second(b[1], log);
         second.handshake();
@@ -960,7 +946,7 @@ void lifecycle(std::vector<std::string>& log) {
     {
         aa::AASession session;
         watch(session, true);
-        startSession(session, a[0]);
+        session.start(a[0]);
         log.push_back(format("session ended=%d", waitEnded(session) ? 1 : 0));
     }
     log.push_back("-- touch forwarding off: keys still go");
@@ -1030,10 +1016,8 @@ bool readLines(const char* path, std::vector<std::string>& lines) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    g_usbTransport = argc == 3 && !strcmp(argv[2], "--usb");
     const bool writing = argc == 3 && !strcmp(argv[1], "--write");
-    const char* golden =
-        writing ? argv[2] : ((argc == 2 || g_usbTransport) ? argv[1] : "tests/fixtures/session_phone.golden");
+    const char* golden = writing ? argv[2] : (argc == 2 ? argv[1] : "tests/fixtures/session_phone.golden");
     signal(SIGPIPE, SIG_IGN);
     signal(SIGALRM, timedOut);
     writeVehicleFile();

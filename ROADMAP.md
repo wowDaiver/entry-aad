@@ -19,9 +19,18 @@ Un point n'est coché qu'avec une preuve en voiture : un test sur PC ne suffit p
   - [ ] GPS de la voiture dans Waze, flèches sur la tête haute
 - [ ] Sans journaux (fichier `maintenance` absent) : tout marche pareil
 
+## 0.12 : câble USB
+
+- [x] Android Auto démarre par câble USB sur la voiture de référence, le sans-fil marche toujours (11 novembre 2026)
+- [ ] Trajet de 20 à 30 minutes par câble, musique en Bluetooth
+- [ ] Câble débranché puis rebranché en cours de route
+- [ ] *Arrêter* puis *Démarrer* sans débrancher, puis retour au sans-fil
+- [ ] Câble essayé sur une autre voiture
+
 ## 1.0 : une autre voiture
 
-- [ ] Rapport de compatibilité d'une deuxième voiture, sans rien installer
+- [x] Rapport de compatibilité d'une deuxième voiture, sans rien installer : X3 G01 de 2020
+  ([#17](https://github.com/Jiraiya43/entry-aad/issues/17))
 - [ ] Première installation sur une autre voiture, puis désinstallation vérifiée
 - [ ] Tableau des logiciels essayés rempli ([compatibilité](docs/COMPATIBILITE.md))
 - [ ] Ancienne molette (contrôleurs C10/C20) essayée sur une vraie voiture
@@ -56,4 +65,3 @@ Un point n'est coché qu'avec une preuve en voiture : un test sur PC ne suffit p
 
 - NBT Evo, ID7 et MGU : autres systèmes, ce programme ne peut pas y tourner.
 - Marques autres que BMW.
-- Android Auto par câble USB.

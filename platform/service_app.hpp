@@ -4,7 +4,8 @@
 
 // platform/main.cpp builds one ServiceApp, wires its callbacks to the components and runs the main loop, which calls
 // turn() every 100 ms. Threads: the main loop, the TCP accept thread (connected), the session thread (frames, focus,
-// microphone, navigation, ended), the vMOST thread (keys, volume), the control thread (command) and the wireless loop.
+// microphone, navigation, ended), the vMOST thread (keys, volume), the control thread (command) and the wireless loop
+// or, with a USB cable, the USB loop (usbPhoneReady).
 #ifndef ENTRY_AAD_PLATFORM_SERVICE_APP_HPP
 #define ENTRY_AAD_PLATFORM_SERVICE_APP_HPP
 
@@ -14,6 +15,7 @@
 #include <stdint.h>
 
 #include <atomic>
+#include <string>
 
 #include "aa_session.hpp"
 #include "alps_spp.hpp"
@@ -25,6 +27,8 @@
 #include "kombi_nav.hpp"
 #include "peek_timing.hpp"
 #include "tcp_server.hpp"
+#include "usb_loop.hpp"
+#include "wifi_link.hpp"
 #include "wireless_loop.hpp"
 #include "wireless_setup.hpp"
 
@@ -32,11 +36,11 @@ namespace evo {
 
 class SppSnapshotReader;
 
-class ServiceApp : public WirelessHost {
+class ServiceApp : public WirelessHost, public UsbHost {
 public:
     // What one turn of the main loop decided, for the inputs, the iDrive app and the loop itself.
     struct Turn {
-        bool failed;          // the wireless loop has ended: the service stops
+        bool failed;          // the wireless or USB loop has ended: the service stops
         bool active;          // an Android Auto session runs
         bool onScreen;        // what the iDrive app is told (peeks included)
         bool shown;           // the picture is on screen, not stepped aside
@@ -78,14 +82,17 @@ public:
     static void navStatus(uint16_t msgId, const uint8_t* body, size_t len, void* user);
     static void ended(void* user);
     static void connected(int fd, void* user);
-    static void connectedTransport(aa::Transport* transport, void* user);
     static void* wireless(void* user);  // thread: runWirelessLoop, then the failure the main loop sees
+    static void* usb(void* user);       // thread: runUsbLoop on usbPort, then the same
 
     // ---- WirelessHost ----
     bool stopRequested() override;
     bool projectionBusy() override;
     void sppLinkOpened() override;
     void handshakeEnded(bool spoke, bool accepted) override;
+
+    // ---- UsbHost (stopRequested and projectionBusy are shared) ----
+    void usbPhoneReady(int fd) override;
 
     // ---- components, wired by main() ----
     EvoKnob* knob;  // phone keys during a call; set by main() before the control thread starts
@@ -98,6 +105,7 @@ public:
     aa::ApInfo ap;
     EvoVideoConfig videoConfig;
     uint16_t port;
+    std::string usbPort;  // USB mode: the one port to watch, or empty for all; set by main()
     bool videoEnabled;
 
     // ---- state ----
@@ -110,11 +118,15 @@ public:
     int pendingFocus;  // service: 1 tell the phone FOCUSED, 2 NATIVE (sent from the main loop)
     PeekTiming peek;   // under mu
     EvoPill pill;
+    WifiLinkLog wifiLink;  // the Wi-Fi link's quality, logged while a wireless session runs
     unsigned sppLinks, tcpLinks, usbLinks;
     std::atomic<unsigned> videoFrames;  // counted on the session thread without mu
     bool wppReply, wppAccepted;
 
 private:
+    // A phone connection, from the TCP listener or the USB loop: the video is made ready and the session starts.
+    void startProjection(int fd, bool overUsb);
+
     volatile sig_atomic_t* quit_;
 };
 

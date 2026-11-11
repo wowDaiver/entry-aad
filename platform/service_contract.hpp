@@ -25,6 +25,8 @@ constexpr char kKombiOff[] = "/var/local/data/AA/kombi-off";          // present
 constexpr char kKombiShown[] = "/var/local/data/AA/kombi-nav.shown";  // an arrow may still be on the cluster
 constexpr char kPhoneGps[] = "/var/local/data/AA/gps-telephone";      // present: the phone keeps its own GPS
 constexpr char kVehicle[] = "/var/local/data/AA/vehicle";             // model=... and year=... told to the phone
+// Present: Android Auto over a USB cable instead of wireless. Empty, or the one USB port to use ("1-1").
+constexpr char kUsb[] = "/var/local/data/AA/usb";
 constexpr char kAppLog[] = "/var/local/data/AA/app.log";
 constexpr char kAppLogOld[] = "/var/local/data/AA/app.old.log";
 constexpr char kAppDisable[] = "/var/local/data/AA/app.disable";  // present: the app stays off (set by hand)

@@ -49,12 +49,11 @@ void printHead(const Message& message) {
 }  // namespace
 
 AASession::AASession()
-    : transport_(nullptr),
+    : socket_(-1),
       running_(false),
       thread_(0),
       vehicleFile_(nullptr),
       softwareVersion_(nullptr),
-      ioFailed_(false),
       videoReady_(false),
       mediaMessages_(0),
       microphoneChunks_(0) {
@@ -150,19 +149,22 @@ bool AASession::clearRunning() {
 
 void AASession::interrupt() {
     MutexLock lock(socketLock_);
-    if (transport_) {
-        transport_->cancel();
+    if (socket_ >= 0) {
+        shutdown(socket_, SHUT_RDWR);  // a recv() or send() blocked in the session thread returns
     }
 }
 
-void AASession::closeTransport() {
-    Transport* stream;
+void AASession::closeSocket() {
+    int fd;
     {
         MutexLock lock(socketLock_);
-        stream = transport_;
-        transport_ = nullptr;
+        fd = socket_;
+        socket_ = -1;
     }
-    delete stream;
+    if (fd >= 0) {
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+    }
 }
 
 void AASession::resetCounters() {
@@ -172,10 +174,6 @@ void AASession::resetCounters() {
 }
 
 bool AASession::start(int client_fd) {
-    return start(socketTransport(client_fd));
-}
-
-bool AASession::start(Transport* transport) {
     MutexLock lifecycle(lifecycleLock_);
     // A session still there (the phone came back before its silence was noticed, or one that ended and was never
     // joined): wake it and join it. Clearing the flag first keeps its thread from running the ended callback; it runs
@@ -187,21 +185,22 @@ bool AASession::start(Transport* transport) {
         pthread_join(thread_, nullptr);
         thread_ = 0;
     }
-    closeTransport();
+    closeSocket();
     if (wasRunning && ended_.fn) {
         ended_.fn(ended_.user);
     }
 
     {
         MutexLock lock(socketLock_);
-        transport_ = transport;
-    }
-    if (!transport) {
-        return false;
+        socket_ = client_fd;
+        // A send to a vanished phone must not hold the session thread for minutes: it also watches the silence.
+        timeval sendLimit;
+        sendLimit.tv_sec = kSilenceMs / 1000;
+        sendLimit.tv_usec = 0;
+        setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &sendLimit, sizeof(sendLimit));
     }
     assembler_.clear();
     inbox_.reset();
-    ioFailed_ = false;
     videoReady_ = false;
     microphoneChunks_ = 0;
     mediaMessages_ = 0;
@@ -212,7 +211,7 @@ bool AASession::start(Transport* transport) {
     if (pthread_create(&thread_, nullptr, &AASession::threadMain, this) != 0) {
         perror("[AASession] Failed to spawn session thread");
         setRunning(false);
-        closeTransport();
+        closeSocket();
         thread_ = 0;
         return false;
     }
@@ -228,7 +227,7 @@ void AASession::stop() {
         pthread_join(thread_, nullptr);
         thread_ = 0;
     }
-    closeTransport();
+    closeSocket();
 }
 
 void* AASession::threadMain(void* self) {
@@ -237,14 +236,14 @@ void* AASession::threadMain(void* self) {
 }
 
 void AASession::run() {
-    printf("[AASession] Protocol thread active on %s.\n", transport_->name());
+    printf("[AASession] Protocol thread active on fd %d.\n", socket_);
     printf("[AASession] Sending VersionRequest (v%u.%u)...\n", kVersionMajor, kVersionMinor);
     if (!sendPlain(channel::kControl, message::versionRequest())) {
         printf("[AASession] Error: Failed to send VersionRequest.\n");
         finish();
         return;
     }
-    while (running() && !ioFailed_) {
+    while (running()) {
         uint8_t channel = 0;
         Message message;
         const Received received = receive(channel, message);
@@ -265,7 +264,7 @@ void AASession::finish() {
     // This thread alone closes the socket, whether the session ended by itself or stop() asked; the ended callback
     // runs only in the first case.
     const bool endedByItself = clearRunning();
-    closeTransport();
+    closeSocket();
     if (endedByItself && ended_.fn) {
         ended_.fn(ended_.user);
     }
@@ -278,16 +277,34 @@ bool AASession::receiveExactly(uint8_t* to, size_t size) {
     uint64_t lastDataMs = locationClockMs();
     const int wakeFd = inbox_.wakeFd();
     while (got < size && running()) {
-        bool woke = false;
-        const ssize_t n = transport_->read(to + got, size - got, wakeFd, woke);
-        if (woke) {
+        const int fd = socket_;
+        if (fd < 0) {
+            return false;
+        }
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(fd, &readable);
+        int highest = fd;
+        if (wakeFd >= 0) {
+            FD_SET(wakeFd, &readable);
+            highest = wakeFd > highest ? wakeFd : highest;
+        }
+        timeval wait;
+        wait.tv_sec = 1;
+        wait.tv_usec = 0;
+        const int ready = select(highest + 1, &readable, nullptr, nullptr, &wait);
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (ready > 0 && wakeFd >= 0 && FD_ISSET(wakeFd, &readable)) {
             inbox_.emptyWake();
             sendCarInput();
         }
-        if (n < 0 || ioFailed_) {
-            return false;
-        }
-        if (n == 0) {
+        if (ready == 0 || !FD_ISSET(fd, &readable)) {
+            // Silence is measured on the clock: car input wakes this loop far more often than once a second.
             const uint64_t silentMs = locationClockMs() - lastDataMs;
             if (silentMs >= kSilenceMs) {
                 printf("[AASession] No data from phone for %u s: treating session as dead.\n",
@@ -297,6 +314,13 @@ bool AASession::receiveExactly(uint8_t* to, size_t size) {
             continue;
         }
         lastDataMs = locationClockMs();
+        const ssize_t n = recv(fd, to + got, size - got, 0);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n <= 0) {
+            return false;
+        }
         got += static_cast<size_t>(n);
     }
     return got == size;
@@ -304,30 +328,21 @@ bool AASession::receiveExactly(uint8_t* to, size_t size) {
 
 bool AASession::sendExactly(const uint8_t* data, size_t size) {
     size_t sent = 0;
-    const uint64_t deadline = locationClockMs() + kSilenceMs;
     while (sent < size && running()) {
-        if (locationClockMs() >= deadline) {
-            ioFailed_ = true;
+        const int fd = socket_;
+        if (fd < 0) {
             return false;
         }
-        const ssize_t n = transport_->write(data + sent, size - sent);
-        if (n < 0) {
-            ioFailed_ = true;
-            return false;
-        }
-        if (n == 0) {
+        const ssize_t n = send(fd, data + sent, size - sent, 0);
+        if (n < 0 && errno == EINTR) {
             continue;
+        }
+        if (n <= 0) {
+            return false;
         }
         sent += static_cast<size_t>(n);
     }
-    if (sent != size) {
-        return false;
-    }
-    if (!transport_->endWrite()) {
-        ioFailed_ = true;
-        return false;
-    }
-    return true;
+    return sent == size;
 }
 
 bool AASession::sendFrame(uint8_t channel, uint8_t flags, const uint8_t* payload, size_t size) {
@@ -348,7 +363,7 @@ AASession::Received AASession::receive(uint8_t& channel, Message& message) {
     uint8_t raw[frame::kHeaderSize];
     if (!receiveExactly(raw, sizeof(raw))) {
         if (running()) {
-            printf("[AASession] Phone transport closed or read error.\n");
+            printf("[AASession] Phone closed socket or read error.\n");
         }
         return kLost;
     }

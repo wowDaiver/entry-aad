@@ -10,6 +10,7 @@
       <raAction id="21"/>
       <raAction id="22"/>
       <raAction id="24"/>
+      <raAction id="26"/>
       <hmiAction id="25" target="12"/>
     </actions>
     <models>
@@ -30,6 +31,10 @@
         <synonyms/>
       </textIdModel>
       <raBoolModel id="34"/>
+      <raBoolModel id="38"/>
+      <textIdModel id="39" textId="17">
+        <synonyms/>
+      </textIdModel>
       <textIdModel id="35" textId="15">
         <synonyms/>
       </textIdModel>
@@ -51,6 +56,9 @@
       <textIdModel id="84" textId="24">
         <synonyms/>
       </textIdModel>
+      <textIdModel id="85" textId="25">
+        <synonyms/>
+      </textIdModel>
       <raIntModel id="40" modelType="NativeStateID" value="1"/>
     </models>
     <events>
@@ -65,6 +73,7 @@
           <button action="22" id="62" model="32" text="Arreter Android Auto"/>
           <separator id="66"/>
           <checkbox action="24" id="64" model="34" text="Demarrage automatique" textModel="35"/>
+          <checkbox action="26" id="68" model="38" text="Cable USB au lieu du sans-fil" textModel="39"/>
           <separator id="67"/>
           <button action="25" id="65" model="36" text="Aide"/>
         </components>
@@ -77,6 +86,7 @@
           <label id="93" model="83"/>
           <separator id="95"/>
           <label id="94" model="84"/>
+          <label id="96" model="85"/>
         </components>
       </hmiState>
       <hmiState id="13" parentId="10" text=" " textModel="37">

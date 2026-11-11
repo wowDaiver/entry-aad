@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -281,6 +282,16 @@ void serviceStop() {
 
 bool stopInProgress() {
     return g_stopPid != 0;
+}
+
+bool supervisorRunning() {
+    int fd = open(contract::kWirelessLock, O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        return false;  // no supervisor has run since the unit started
+    }
+    const bool held = flock(fd, LOCK_EX | LOCK_NB) != 0;
+    close(fd);  // gives the lock back when it was free
+    return held;
 }
 
 }  // namespace app

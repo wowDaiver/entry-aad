@@ -36,11 +36,13 @@ TEXTS = {
     14: "Open Android Auto",
     15: "Start automatically",
     16: "Help",
+    17: "USB cable instead of wireless",
     20: "NAV: Android Auto navigation",
     21: "MEDIA: Android Auto media",
     22: "COM / steering wheel phone button: Android Auto phone",
     23: "MENU: iDrive - OPTION: this menu - BACK: back",
     24: "Phone: wireless Android Auto on, paired with the car",
+    25: "USB cable: a data cable, the phone still paired for the sound",
     30: " ",
 }  # blank title of the page held under Android Auto (no "Android Auto" tab during the volume)
 LANG_TEXTS = {  # ASCII only
@@ -52,11 +54,13 @@ LANG_TEXTS = {  # ASCII only
         14: "Ouvrir Android Auto",
         15: "Demarrage automatique",
         16: "Aide",
+        17: "Cable USB au lieu du sans-fil",
         20: "NAV : navigation Android Auto",
         21: "MEDIA : musique Android Auto",
         22: "COM / bouton telephone du volant : telephone Android Auto",
         23: "MENU : iDrive - OPTION : ce menu - BACK : retour",
         24: "Telephone : Android Auto sans fil active, appaire a la voiture",
+        25: "Cable USB : cable de donnees, telephone toujours appaire pour le son",
     },
     "de": {
         2: "Android Auto: Verbinden...",
@@ -66,11 +70,13 @@ LANG_TEXTS = {  # ASCII only
         14: "Android Auto oeffnen",
         15: "Automatisch starten",
         16: "Hilfe",
+        17: "USB-Kabel statt kabellos",
         20: "NAV: Android Auto Navigation",
         21: "MEDIA: Android Auto Medien",
         22: "COM / Telefontaste am Lenkrad: Android Auto Telefon",
         23: "MENU: iDrive - OPTION: dieses Menue - BACK: zurueck",
         24: "Telefon: Android Auto kabellos an, mit dem Auto gekoppelt",
+        25: "USB-Kabel: Datenkabel, Telefon fuer den Ton weiter gekoppelt",
     },
 }
 LANG_TEXTS["fr-CA"] = LANG_TEXTS["fr-FR"]

@@ -8,29 +8,44 @@ QEMU avec les bibliothèques de la voiture).
 
 ## [Non publié]
 
+## [0.12.0-rc.2] - 2026-11-11 · PC
+
+Version candidate, **testée sur PC seulement** : à essayer en voiture. Elle change l'appli de l'iDrive : installée
+par-dessus la 0.12.0-rc.1, elle demande un redémarrage de l'unité.
+
 ### Ajouté
 
-- Transport Android Auto USB/AOA facultatif, avec le même protocole TLS, décodeur, commandes, GPS et micro que le
-  transport TCP. Le son reste sur le Bluetooth BMW. Sans fichier `usb-phone`, le démarrage reste sans fil.
-- Sélection au démarrage par `/var/local/data/AA/usb-phone` : `auto PORT VID PID` choisit USB si le téléphone est
-  présent sur ce port, sinon sans fil ; `PORT VID PID` impose USB. Aucun basculement pendant une session.
-  [Configuration et limites](docs/USB.md).
-- Requêtes de contrôle AOA 51/52/53 envoyées uniquement au téléphone choisi, puis interface 0 et paire bulk validées
-  sur le même port après réénumération. Utilisation de la libusb déjà installée, sans détachement, reset, changement
-  de configuration ni arrêt d'un service BMW. Aucun changement au point d'accès du téléphone.
-- Tests simulés des transferts partiels, annulation, descripteurs, refus d'interface occupée, sélection au démarrage,
-  arrêt et verrou du superviseur. Le relevé figé du téléphone est aussi rejoué sur USB, sans modifier ses octets.
+- Menu de l'iDrive : la case **Câble USB au lieu du sans-fil** choisit le mode, sans PC ni SSH. Elle pose ou retire
+  le fichier `usb` ; si Android Auto tourne, il s'arrête puis redémarre dans le nouveau mode. Le mode n'est jamais
+  déduit de ce qui est branché : un téléphone mis en charge par un passager ne change rien. Une ligne d'aide
+  rappelle que le son reste en Bluetooth. [Détails](docs/USB.md). Testé sur PC.
+- Journaux : la qualité du Wi-Fi avec le téléphone, une ligne `[WifiLink]` à la connexion puis toutes les 10 secondes
+  (fréquence, signal, débits, trames réémises et perdues, temps d'aller-retour). Lecture seule, journaux activés
+  seulement, rien en mode USB. [Lire ces lignes](docs/MAINTENANCE.md#qualité-du-wi-fi). Testé sur PC.
 
-### Validation et limites
+### Modifié
 
-- Essais courts en voiture sur BMW X3, EntryNav2 `002_146`, écran 1280×480, Samsung S24+ : image, molette et appui
-  iDrive, son Bluetooth et micro confirmés. Le démarrage automatique USB depuis le menu iDrive a également fonctionné.
-  Le test borné à 180 s inclut l'attente du branchement ; il représente environ 131 s de projection, pas 180 s.
-- Après Arrêter, le processus BMW `vmostAuxInUSB` peut prendre l'interface AOA. Un débranchement/rebranchement avant
-  Démarrer peut rester nécessaire ; le service ne lui reprend jamais l'interface.
-- La stabilité sur 20 minutes, le débranchement/rebranchement en projection, le retour sans fil dans cette voiture et
-  la caméra de recul ne sont pas validés par ces essais. La matrice ARM/QEMU complète reste à exécuter pour cette
-  contribution. Les journaux et fichiers de la voiture ne font pas partie du dépôt.
+- Installation : le numéro de version ne s'écrit plus que deux fois (commande `scp` et ligne `V=`), au lieu d'être
+  répété dans chaque commande ([#19](https://github.com/Jiraiya43/entry-aad/issues/19)).
+- Feuille de route : le câble USB n'est plus « hors périmètre », ses essais restants y sont listés, et le premier
+  rapport de compatibilité d'une autre voiture y est noté ([#17](https://github.com/Jiraiya43/entry-aad/issues/17)).
+
+## [0.12.0-rc.1] - 2026-11-11 · voiture
+
+Version candidate, **essayée en voiture** sur une BMW G20 : Android Auto démarre en sans-fil comme par câble USB.
+Restent à confirmer par câble : la tenue sur un long trajet, le débranchement en cours de route, et d'autres
+téléphones et voitures. Les changements de la 0.11.0-rc.1 sont inclus ; la 0.11.0 ne sortira pas à part.
+
+### Ajouté
+
+- Android Auto par câble USB, expérimental et facultatif : avec le fichier `/var/local/data/AA/usb`, le service
+  attend un téléphone Android sur les prises USB de la voiture au lieu de préparer le Bluetooth et le Wi-Fi. Sans ce
+  fichier, rien ne change : Android Auto reste sans fil. Le son reste sur le Bluetooth de la voiture.
+  [Activation et limites](docs/USB.md). Idée, premiers essais en voiture et observations sur le service USB de BMW :
+  [@wowDaiver](https://github.com/wowDaiver) ([#18](https://github.com/Jiraiya43/entry-aad/pull/18)). Essayé en voiture.
+- Nouvelle écriture vers un appareil de la voiture : les requêtes du mode accessoire (AOA 51, 52, 53) et une
+  réinitialisation USB, envoyées seulement à un téléphone Android branché, et seulement en mode USB. Aucune interface
+  USB n'est prise à un pilote ou à un programme BMW.
 
 ## [0.11.0-rc.1] - 2026-11-10 · PC
 
@@ -81,6 +96,8 @@ Première version publique. Essayée sur une BMW G20 de 2019, logiciel iDrive `2
   encore suivie sur une voiture.
 - Voir les [limites connues](ROADMAP.md#limites-connues).
 
-[Non publié]: https://github.com/Jiraiya43/entry-aad/compare/v0.11.0-rc.1...HEAD
+[Non publié]: https://github.com/Jiraiya43/entry-aad/compare/v0.12.0-rc.2...HEAD
+[0.12.0-rc.2]: https://github.com/Jiraiya43/entry-aad/releases/tag/v0.12.0-rc.2
+[0.12.0-rc.1]: https://github.com/Jiraiya43/entry-aad/releases/tag/v0.12.0-rc.1
 [0.11.0-rc.1]: https://github.com/Jiraiya43/entry-aad/releases/tag/v0.11.0-rc.1
 [0.10.0]: https://github.com/Jiraiya43/entry-aad/releases/tag/v0.10.0

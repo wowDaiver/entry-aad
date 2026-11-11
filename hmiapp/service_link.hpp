@@ -26,6 +26,9 @@ ServiceState readServiceState();
 void beginStop();
 void serviceStop();  // once per status poll
 bool stopInProgress();
+// A supervisor is there, from its start to the end of its Bluetooth restore: it holds its lock, whoever started
+// it. A second one would refuse to start.
+bool supervisorRunning();
 
 }  // namespace app
 }  // namespace evo

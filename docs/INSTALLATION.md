@@ -18,15 +18,19 @@ voiture.
   dont l'empreinte SHA-256 correspond au fichier `.sha256` publié à côté, ou fabriquée par `tools/package_release.py`
   ([compiler](../README.fr.md#compiler)).
 
-Dans les commandes ci-dessous, `0.10.0` est à remplacer par la version installée, et `169.254.1.0` par l'adresse de
-l'unité si elle diffère : c'est celle de la voiture de référence sur le câble ENET.
+Le numéro de version ne s'écrit que deux fois : dans la commande `scp` de l'étape 1 et sur la ligne `V=` de l'étape 2.
+Y mettre celui de l'archive téléchargée. `169.254.1.0` est l'adresse de la voiture de référence sur le câble ENET : la
+remplacer par celle de l'unité si elle diffère.
+
+Cette page décrit la version en cours. Chaque archive contient sa propre `INSTALLATION.md` : pour une version plus
+ancienne, suivre celle de l'archive (dans la 0.10.0, le superviseur s'appelle `evo-trial` et non `aa-supervisor`).
 
 ## 1. Copier l'archive dans la voiture
 
 Depuis le PC, dans le dossier de l'archive :
 
 ```sh
-scp entry-aad-0.10.0-armhf.tar root@169.254.1.0:/tmp/
+scp entry-aad-0.12.0-rc.2-armhf.tar root@169.254.1.0:/tmp/
 ssh root@169.254.1.0
 ```
 
@@ -38,11 +42,14 @@ encore écrit sur la mémoire flash.
 Rien n'est modifié pendant cette étape.
 
 ```sh
-cd /tmp && rm -rf entry-aad-0.10.0 && tar -xf entry-aad-0.10.0-armhf.tar && cd entry-aad-0.10.0
+V=0.12.0-rc.2
+cd /tmp && rm -rf entry-aad-$V && tar -xf entry-aad-$V-armhf.tar && cd entry-aad-$V
 md5sum -c MD5SUMS
 head -n 1 /etc/version
 df -k /
 ```
+
+La ligne `V=` vaut pour toute la session SSH, étape 3 comprise : après une reconnexion, la retaper.
 
 Chaque fichier doit répondre `OK`, et il faut au moins 16 Mo libres (colonne `Available`, en Ko). Ensuite, le chargeur de
 l'unité vérifie que chaque bibliothèque et chaque fonction utilisée existe, sans rien exécuter, puis `aa-supervisor --compat`
@@ -81,7 +88,7 @@ chmod 755 /opt/aa/entry-aad /opt/aa/aa-supervisor /opt/hmi/data/ro/Plugins/Entry
 touch /opt/aa/.installed-by-entryaad /opt/hmi/data/ro/Plugins/EntryAad/.installed-by-entryaad
 sync
 mount -o remount,ro /
-cd / && md5sum -c /tmp/entry-aad-0.10.0/MD5SUMS
+cd / && md5sum -c /tmp/entry-aad-$V/MD5SUMS
 ```
 
 - `rm -f` avant la copie : l'iDrive garde l'ancienne appli en mémoire jusqu'à son redémarrage, et un fichier effacé puis
@@ -100,7 +107,7 @@ mkdir -p /var/local/data/AA && printf 'model=320d\nyear=2020\n' > /var/local/dat
 Puis redémarrer l'unité :
 
 ```sh
-rm -rf /tmp/entry-aad-0.10.0 /tmp/entry-aad-0.10.0-armhf.tar
+rm -rf /tmp/entry-aad-$V /tmp/entry-aad-$V-armhf.tar
 reboot
 ```
 
@@ -110,12 +117,8 @@ Sur l'iDrive : *Media*, puis *Android Auto*, puis *Démarrer*. La première fois
 Bluetooth s'il ne l'est pas déjà, et accepter la voiture sur le téléphone : Android Auto rejoint ensuite le Wi-Fi de la
 voiture tout seul. La case *Démarrage automatique* du menu lance Android Auto avec l'iDrive.
 
-## USB facultatif
-
-Les versions publiées avant cette contribution restent sans fil. Pour une compilation incluant le transport USB,
-voir [USB](USB.md) : seul le fichier facultatif `/var/local/data/AA/usb-phone` est ajouté aux réglages. La négociation
-AOA écrit des requêtes de contrôle USB au téléphone sélectionné ; elle ne modifie aucun fichier BMW. Le mode USB
-n'emprunte pas le Bluetooth de démarrage et n'active pas le point d'accès Wi-Fi de la voiture.
+Android Auto peut aussi passer par un câble USB : cocher *Câble USB au lieu du sans-fil* dans le même menu, voir
+[USB](USB.md).
 
 ## Mettre à jour
 
