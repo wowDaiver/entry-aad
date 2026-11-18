@@ -8,6 +8,15 @@ QEMU avec les bibliothèques de la voiture).
 
 ## [Non publié]
 
+### Ajouté
+
+- Module expérimental autonome `Vehicle Telemetry 0.1.0` pour EntryNav2 146 : instruments natifs,
+  sources CDS/DDE/EGS, couple et puissance calculée, mode M/S, frein à main et lecture IGR.
+  Essayé sur une unité 146 ; commutation du frein à main confirmée. La concordance de la récupération
+  active avec Eco Pro en roulant reste à vérifier. Sources GPL séparées du démon Android Auto,
+  réponses de test anonymisées et contrôles PC sans fichiers BMW. Voir
+  [le module](development/vehicle-telemetry/README.md).
+
 ## [0.12.0-rc.2] - 2026-11-11 · PC
 
 Version candidate, **testée sur PC seulement** : à essayer en voiture. Elle change l'appli de l'iDrive : installée

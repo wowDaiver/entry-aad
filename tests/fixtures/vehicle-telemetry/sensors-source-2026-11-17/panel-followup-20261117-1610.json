@@ -1,0 +1,96 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "aba7cb41280582f07d9affe3d2da3b82933abaf84ad44934f32ca50aa9c96dfc",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0xf197",
+      "name": "system_name",
+      "request_hex": "000000050001f41222f197",
+      "frames": [
+        "000000050002f41222f197",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41822f150",
+      "frames": [
+        "000000050002f41822f150",
+        "00000008000118f462f1500f21d0"
+      ],
+      "status": "positive",
+      "data_hex": "0f21d0",
+      "length": 3
+    },
+    {
+      "ecu": "0x18",
+      "did": "0x6008",
+      "name": "native_output_rpm",
+      "request_hex": "000000050001f418226008",
+      "frames": [
+        "000000050002f418226008",
+        "00000006000118f462600800"
+      ],
+      "status": "positive",
+      "data_hex": "00",
+      "length": 1
+    },
+    {
+      "ecu": "0x18",
+      "did": "0x6009",
+      "name": "native_turbine_rpm",
+      "request_hex": "000000050001f418226009",
+      "frames": [
+        "000000050002f418226009",
+        "00000006000118f462600917"
+      ],
+      "status": "positive",
+      "data_hex": "17",
+      "length": 1
+    },
+    {
+      "ecu": "0x18",
+      "did": "0x600a",
+      "name": "native_engine_rpm",
+      "request_hex": "000000050001f41822600a",
+      "frames": [
+        "000000050002f41822600a",
+        "00000006000118f462600a18"
+      ],
+      "status": "positive",
+      "data_hex": "18",
+      "length": 1
+    },
+    {
+      "ecu": "0x18",
+      "did": "0x600c",
+      "name": "native_current_gear",
+      "request_hex": "000000050001f41822600c",
+      "frames": [
+        "000000050002f41822600c",
+        "00000006000118f462600c01"
+      ],
+      "status": "positive",
+      "data_hex": "01",
+      "length": 1
+    }
+  ]
+}

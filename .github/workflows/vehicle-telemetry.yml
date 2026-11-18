@@ -1,0 +1,38 @@
+name: Vehicle telemetry
+
+on:
+  push:
+    branches: [feat/vehicle-telemetry]
+    paths:
+      - development/vehicle-telemetry/**
+      - diagnostics/**
+      - tests/fixtures/vehicle-telemetry/**
+      - .github/workflows/vehicle-telemetry.yml
+  pull_request:
+    paths:
+      - development/vehicle-telemetry/**
+      - diagnostics/**
+      - tests/fixtures/vehicle-telemetry/**
+      - .github/workflows/vehicle-telemetry.yml
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libfreetype6-dev zlib1g-dev pkg-config fonts-dejavu-core python3-venv
+          python3 -m venv /tmp/style
+          /tmp/style/bin/pip install ruff==0.6.9
+      - name: Python style
+        run: |
+          /tmp/style/bin/ruff check --no-respect-gitignore development/vehicle-telemetry diagnostics
+          /tmp/style/bin/ruff format --check --no-respect-gitignore development/vehicle-telemetry diagnostics
+      - name: Host regressions and sanitizers
+        run: python3 development/vehicle-telemetry/check_host.py --font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf

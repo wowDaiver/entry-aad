@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 146 candidate: insert after the native tyre-pressure entry in Vehicle Status.
+     State 580 and anchor 2640 are verified statically; live insertion remains untested. -->
+<pluginApps>
+  <pluginApp applicationType="Custom" applicationWeight="200"
+      insertStateID="580" insertAfterFocusID="2640" entryButtonFocusID="32750"
+      text="Параметры автомобиля" textModel="3">
+    <entryButton id="1" action="2" model="3" imageModel="4"><properties/></entryButton>
+    <actions>
+      <hmiAction id="2" target="10"/>
+      <hmiAction id="40" target="11"/>
+      <hmiAction id="41" target="12"/>
+      <hmiAction id="42" target="13"/>
+      <hmiAction id="43" target="14"/>
+      <hmiAction id="45" target="16"/>
+      <hmiAction id="46" target="17"/>
+    </actions>
+    <models>
+      <textIdModel id="3" textId="1"><synonyms/></textIdModel>
+      <imageIdModel id="4" imageId="1"/>
+      <textIdModel id="20" textId="2"><synonyms/></textIdModel>
+      <textIdModel id="21" textId="3"><synonyms/></textIdModel>
+      <textIdModel id="22" textId="4"><synonyms/></textIdModel>
+      <textIdModel id="23" textId="5"><synonyms/></textIdModel>
+      <textIdModel id="25" textId="7"><synonyms/></textIdModel>
+      <textIdModel id="26" textId="8"><synonyms/></textIdModel>
+      <raDataModel id="100"/><raDataModel id="101"/><raDataModel id="102"/>
+      <raDataModel id="103"/><raDataModel id="104"/><raDataModel id="105"/>
+      <raDataModel id="106"/><raDataModel id="107"/><raDataModel id="108"/>
+      <raDataModel id="109"/><raDataModel id="110"/><raDataModel id="111"/>
+      <raDataModel id="112"/><raDataModel id="113"/><raDataModel id="114"/>
+      <raDataModel id="130"/><raDataModel id="131"/><raDataModel id="132"/>
+      <raDataModel id="133"/><raDataModel id="134"/><raDataModel id="135"/>
+      <raDataModel id="136"/><raDataModel id="137"/>
+      <raDataModel id="138"/><raDataModel id="139"/><raDataModel id="140"/>
+    </models>
+    <hmiStates>
+      <hmiState id="10" text="Параметры автомобиля" textModel="3">
+        <components>
+          <button id="200" action="40" model="20" text="Двигатель"/>
+          <button id="201" action="41" model="21" text="Наддув и топливо"/>
+          <button id="202" action="42" model="22" text="Электрика"/>
+          <button id="203" action="43" model="23" text="Движение"/>
+          <button id="206" action="45" model="25" text="АКПП"/>
+          <separator id="204"/>
+          <label id="214" model="114"/>
+        </components>
+      </hmiState>
+      <hmiState id="11" parentId="10" text="Двигатель" textModel="20">
+        <components>
+          <label id="300" model="100"/><label id="301" model="101"/>
+          <label id="314" model="130"/><label id="308" model="108"/>
+          <label id="312" model="112"/>
+        </components>
+      </hmiState>
+      <hmiState id="12" parentId="10" text="Наддув и топливо" textModel="21">
+        <components>
+          <label id="306" model="106"/><label id="310" model="110"/>
+          <label id="311" model="111"/><label id="304" model="104"/>
+          <label id="307" model="107"/>
+        </components>
+      </hmiState>
+      <hmiState id="13" parentId="10" text="Электрика" textModel="22">
+        <components><label id="309" model="109"/><label id="305" model="105"/>
+          <label id="315" model="131"/><label id="316" model="132"/></components>
+      </hmiState>
+      <hmiState id="14" parentId="10" text="Движение" textModel="23">
+        <components>
+          <label id="302" model="102"/><label id="303" model="103"/>
+        </components>
+      </hmiState>
+      <hmiState id="16" parentId="10" text="АКПП" textModel="25">
+        <components>
+          <label id="313" model="113"/><label id="317" model="133"/>
+          <label id="318" model="134"/><label id="319" model="135"/>
+          <button id="207" action="46" model="26" text="Валы и передача"/>
+        </components>
+      </hmiState>
+      <hmiState id="17" parentId="16" text="Валы и передача" textModel="26">
+        <components><label id="320" model="136"/><label id="321" model="137"/>
+          <label id="322" model="138"/><label id="323" model="139"/><label id="324" model="140"/></components>
+      </hmiState>
+    </hmiStates>
+  </pluginApp>
+</pluginApps>

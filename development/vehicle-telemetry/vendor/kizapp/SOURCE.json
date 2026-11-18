@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/kizapp/entrynav2-idrive6-android-auto",
+  "commit": "5d7b6daabdf2ef2cb751d2030f44aa62910974ea",
+  "license": "GPL-3.0-or-later",
+  "files": {
+    "profile_gate.hpp": "289f39855a6599a9d887d5369ff42cf4719e8b6531d3da0d806f147c91b9aa33",
+    "LICENSE": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+  },
+  "use": "Unmodified read-only Build ID gate; PluginApp lifecycle pattern reviewed in src/native_app.cpp; no unpublished telemetry implementation was located."
+}

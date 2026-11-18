@@ -1,0 +1,106 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "1e2ff58db12eda6e627312e8fa2d919c4b065f647394a09ef9d5d1178d037ad2",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x46b4",
+      "name": "parking_brake_lamp_raw",
+      "request_hex": "000000050001f4122246b4",
+      "frames": [
+        "000000050002f4122246b4",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x43bf",
+      "name": "generator_state_raw",
+      "request_hex": "000000050001f4122243bf",
+      "frames": [
+        "000000050002f4122243bf",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x586d",
+      "name": "producer_status_raw",
+      "request_hex": "000000050001f41222586d",
+      "frames": [
+        "000000050002f41222586d",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x42a1",
+      "name": "recuperated_charge_candidate",
+      "request_hex": "000000050001f4122242a1",
+      "frames": [
+        "000000050002f4122242a1",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x40c0",
+      "name": "igr_charge_counters_candidate",
+      "request_hex": "000000050001f4122240c0",
+      "frames": [
+        "000000050002f4122240c0",
+        "00000015000112f46240c0036899fc080851ef001274f0000cca54"
+      ],
+      "status": "positive",
+      "data_hex": "036899fc080851ef001274f0000cca54",
+      "length": 16
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41822f150",
+      "frames": [
+        "000000050002f41822f150",
+        "00000008000118f462f1500f21d0"
+      ],
+      "status": "positive",
+      "data_hex": "0f21d0",
+      "length": 3
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xda31",
+      "name": "parking_brake_status",
+      "request_hex": "000000050001f41822da31",
+      "frames": [
+        "000000050002f41822da31",
+        "00000007000118f462da310001"
+      ],
+      "status": "positive",
+      "data_hex": "0001",
+      "length": 2
+    }
+  ]
+}

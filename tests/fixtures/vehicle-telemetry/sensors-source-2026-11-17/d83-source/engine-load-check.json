@@ -1,0 +1,57 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "a74dcd11e328ce8848b2736eb94f290d207dfdf71cd63859f13264431013ba29",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0xf404",
+      "name": "calculated_engine_load_uds",
+      "request_hex": "000000050001f41222f404",
+      "frames": [
+        "000000050002f41222f404",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x0104",
+      "name": "calculated_engine_load_obd",
+      "request_hex": "000000040001f4120104",
+      "frames": [
+        "000000040002f4120104",
+        "00000005000112f4410485"
+      ],
+      "status": "positive",
+      "data_hex": "85",
+      "length": 1
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x010d",
+      "name": "vehicle_speed_obd",
+      "request_hex": "000000040001f412010d",
+      "frames": [
+        "000000040002f412010d",
+        "00000005000112f4410d00"
+      ],
+      "status": "positive",
+      "data_hex": "00",
+      "length": 1
+    }
+  ]
+}

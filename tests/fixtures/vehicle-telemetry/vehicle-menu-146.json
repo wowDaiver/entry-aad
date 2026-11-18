@@ -1,0 +1,11 @@
+{
+  "placement": {
+    "insert_state": 580,
+    "insert_after_focus": 2640,
+    "entry_focus": 32750,
+    "native_anchor": "FI_MyV_VehicleStatus_CB_TirePressure_Button",
+    "live_insertion_verified": false,
+    "entry_focus_collision_checked_on_hu": false
+  },
+  "source": "Owner146 static RHMI placement observations; metadata only"
+}

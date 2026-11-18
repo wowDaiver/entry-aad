@@ -1,0 +1,108 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "8561367d1501a722cb5ea1a93c3dcff7bf6275aadaa4857136b91cd0d0b7efd6",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x4286",
+      "name": "battery_current_ibs",
+      "request_hex": "000000050001f412224286",
+      "frames": [
+        "000000050002f412224286",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x428c",
+      "name": "battery_temperature_ibs",
+      "request_hex": "000000050001f41222428c",
+      "frames": [
+        "000000050002f41222428c",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x5866",
+      "name": "battery_voltage_available",
+      "request_hex": "000000050001f412225866",
+      "frames": [
+        "000000050002f412225866",
+        "00000007000112f462586639e1"
+      ],
+      "status": "positive",
+      "data_hex": "39e1",
+      "length": 2
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x5868",
+      "name": "battery_temperature_available",
+      "request_hex": "000000050001f412225868",
+      "frames": [
+        "000000050002f412225868",
+        "00000006000112f462586886"
+      ],
+      "status": "positive",
+      "data_hex": "86",
+      "length": 1
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x42b9",
+      "name": "oil_pressure_corrected_relative",
+      "request_hex": "000000050001f4122242b9",
+      "frames": [
+        "000000050002f4122242b9",
+        "00000007000112f46242b90507"
+      ],
+      "status": "positive",
+      "data_hex": "0507",
+      "length": 2
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x42bc",
+      "name": "oil_pressure_actual",
+      "request_hex": "000000050001f4122242bc",
+      "frames": [
+        "000000050002f4122242bc",
+        "00000007000112f46242bc0507"
+      ],
+      "status": "positive",
+      "data_hex": "0507",
+      "length": 2
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x4b5e",
+      "name": "oil_pressure_sensor",
+      "request_hex": "000000050001f412224b5e",
+      "frames": [
+        "000000050002f412224b5e",
+        "00000007000112f4624b5e050e"
+      ],
+      "status": "positive",
+      "data_hex": "050e",
+      "length": 2
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "9c7ef5e58e35d4413a2e58b5423f08657feb0a765b86f393f91190dbc65bacef",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x43c0",
+      "name": "battery_current_energy_management",
+      "request_hex": "000000050001f4122243c0",
+      "frames": [
+        "000000050002f4122243c0",
+        "00000007000112f46243c07fa3"
+      ],
+      "status": "positive",
+      "data_hex": "7fa3",
+      "length": 2
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x42ee",
+      "name": "storage_current_available",
+      "request_hex": "000000050001f4122242ee",
+      "frames": [
+        "000000050002f4122242ee",
+        "00000007000112f46242ee0000"
+      ],
+      "status": "positive",
+      "data_hex": "0000",
+      "length": 2
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x42eb",
+      "name": "battery_terminal_voltage",
+      "request_hex": "000000050001f4122242eb",
+      "frames": [
+        "000000050002f4122242eb",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x5868",
+      "name": "battery_temperature_available",
+      "request_hex": "000000050001f412225868",
+      "frames": [
+        "000000050002f412225868",
+        "00000006000112f462586886"
+      ],
+      "status": "positive",
+      "data_hex": "86",
+      "length": 1
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x42b9",
+      "name": "oil_pressure_corrected_relative",
+      "request_hex": "000000050001f4122242b9",
+      "frames": [
+        "000000050002f4122242b9",
+        "00000007000112f46242b9050d"
+      ],
+      "status": "positive",
+      "data_hex": "050d",
+      "length": 2
+    }
+  ]
+}

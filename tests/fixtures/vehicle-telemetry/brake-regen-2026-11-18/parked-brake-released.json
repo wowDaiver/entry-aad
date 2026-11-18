@@ -1,0 +1,58 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "2d8b7caf389de4ee5d2c932fdc71b7c4110c8b04f905de055088ecdd4b01478f",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x40c0",
+      "name": "igr_charge_counters_candidate",
+      "request_hex": "000000050001f4122240c0",
+      "frames": [
+        "000000050002f4122240c0",
+        "00000015000112f46240c0036899fc080853c9001274f0000cbbc4"
+      ],
+      "status": "positive",
+      "data_hex": "036899fc080853c9001274f0000cbbc4",
+      "length": 16
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41822f150",
+      "frames": [
+        "000000050002f41822f150",
+        "00000008000118f462f1500f21d0"
+      ],
+      "status": "positive",
+      "data_hex": "0f21d0",
+      "length": 3
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xda31",
+      "name": "parking_brake_status",
+      "request_hex": "000000050001f41822da31",
+      "frames": [
+        "000000050002f41822da31",
+        "00000007000118f462da310000"
+      ],
+      "status": "positive",
+      "data_hex": "0000",
+      "length": 2
+    }
+  ]
+}

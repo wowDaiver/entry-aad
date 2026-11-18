@@ -1,0 +1,607 @@
+{
+  "symbol": {
+    "name": "_ZTVN3bmw9PluginAppE",
+    "va": 71304,
+    "size": 172,
+    "type": 1,
+    "binding": 1,
+    "other": 0,
+    "section": 20
+  },
+  "primary_slot_count": 34,
+  "address_point_elf_va": "0x11690",
+  "runtime_address": null,
+  "rows": [
+    {
+      "kind": "literal",
+      "raw": "0x0",
+      "elf_va": "0x0",
+      "offset": "0x0",
+      "word_elf_va": "0x11688",
+      "file_offset": "0x9688",
+      "region": "primary_header",
+      "target_symbol_aliases": []
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZTIN3bmw9PluginAppE",
+      "elf_va": "0x11668",
+      "offset": "0x4",
+      "word_elf_va": "0x1168c",
+      "file_offset": "0x968c",
+      "region": "primary_header",
+      "target_symbol_aliases": []
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginAppD1Ev",
+      "elf_va": "0x61d7",
+      "offset": "0x8",
+      "word_elf_va": "0x11690",
+      "file_offset": "0x9690",
+      "primary_slot": 0,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginAppD1Ev",
+        "_ZN3bmw9PluginAppD2Ev"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginAppD0Ev",
+      "elf_va": "0x6363",
+      "offset": "0xc",
+      "word_elf_va": "0x11694",
+      "file_offset": "0x9694",
+      "primary_slot": 1,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginAppD0Ev"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp5startEv",
+      "elf_va": "0x5c91",
+      "offset": "0x10",
+      "word_elf_va": "0x11698",
+      "file_offset": "0x9698",
+      "primary_slot": 2,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp5startEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp4stopEv",
+      "elf_va": "0x5d99",
+      "offset": "0x14",
+      "word_elf_va": "0x1169c",
+      "file_offset": "0x969c",
+      "primary_slot": 3,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp4stopEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp8activateEv",
+      "elf_va": "0x5bff",
+      "offset": "0x18",
+      "word_elf_va": "0x116a0",
+      "file_offset": "0x96a0",
+      "primary_slot": 4,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp8activateEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp10deactivateEv",
+      "elf_va": "0x5c43",
+      "offset": "0x1c",
+      "word_elf_va": "0x116a4",
+      "file_offset": "0x96a4",
+      "primary_slot": 5,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp10deactivateEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp4initEv",
+      "elf_va": "0x5c61",
+      "offset": "0x20",
+      "word_elf_va": "0x116a8",
+      "file_offset": "0x96a8",
+      "primary_slot": 6,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp4initEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp8finalizeEv",
+      "elf_va": "0x5c7b",
+      "offset": "0x24",
+      "word_elf_va": "0x116ac",
+      "file_offset": "0x96ac",
+      "primary_slot": 7,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp8finalizeEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp4postERKNS_7MessageE",
+      "elf_va": "0x5be1",
+      "offset": "0x28",
+      "word_elf_va": "0x116b0",
+      "file_offset": "0x96b0",
+      "primary_slot": 8,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp4postERKNS_7MessageE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp4postERKNS_7MessageEj",
+      "elf_va": "0x5bd3",
+      "offset": "0x2c",
+      "word_elf_va": "0x116b4",
+      "file_offset": "0x96b4",
+      "primary_slot": 9,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp4postERKNS_7MessageEj"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp4postEPNS_8RunnableE",
+      "elf_va": "0x5bc5",
+      "offset": "0x30",
+      "word_elf_va": "0x116b8",
+      "file_offset": "0x96b8",
+      "primary_slot": 10,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp4postEPNS_8RunnableE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp4postEPNS_8RunnableEj",
+      "elf_va": "0x5bb7",
+      "offset": "0x34",
+      "word_elf_va": "0x116bc",
+      "file_offset": "0x96bc",
+      "primary_slot": 11,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp4postEPNS_8RunnableEj"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZNK3bmw9PluginApp7getNameEv",
+      "elf_va": "0x5b45",
+      "offset": "0x38",
+      "word_elf_va": "0x116c0",
+      "file_offset": "0x96c0",
+      "primary_slot": 12,
+      "target_symbol_aliases": [
+        "_ZNK3bmw9PluginApp7getNameEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZNK3bmw9PluginApp15getResourceFileENS_12ResourceType13ResourceTypesE",
+      "elf_va": "0x5d19",
+      "offset": "0x3c",
+      "word_elf_va": "0x116c4",
+      "file_offset": "0x96c4",
+      "primary_slot": 13,
+      "target_symbol_aliases": [
+        "_ZNK3bmw9PluginApp15getResourceFileENS_12ResourceType13ResourceTypesE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZNK3bmw9PluginApp10getVersionERjS1_S1_",
+      "elf_va": "0x5b4d",
+      "offset": "0x40",
+      "word_elf_va": "0x116c8",
+      "file_offset": "0x96c8",
+      "primary_slot": 14,
+      "target_symbol_aliases": [
+        "_ZNK3bmw9PluginApp10getVersionERjS1_S1_"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZNK3bmw9PluginApp14getRhmiVersionERNS_20RHMIInterfaceVersionE",
+      "elf_va": "0x5b5f",
+      "offset": "0x44",
+      "word_elf_va": "0x116cc",
+      "file_offset": "0x96cc",
+      "primary_slot": 15,
+      "target_symbol_aliases": [
+        "_ZNK3bmw9PluginApp14getRhmiVersionERNS_20RHMIInterfaceVersionE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp13invokeCommandEjRKNS_6ParcelE",
+      "elf_va": "0x6add",
+      "offset": "0x48",
+      "word_elf_va": "0x116d0",
+      "file_offset": "0x96d0",
+      "primary_slot": 16,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp13invokeCommandEjRKNS_6ParcelE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp11updateModelEjRKNS_6ParcelEh",
+      "elf_va": "0x6aa1",
+      "offset": "0x4c",
+      "word_elf_va": "0x116d4",
+      "file_offset": "0x96d4",
+      "primary_slot": 17,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp11updateModelEjRKNS_6ParcelEh"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp11handleEventEjjRKNS_6ParcelE",
+      "elf_va": "0x6cc3",
+      "offset": "0x50",
+      "word_elf_va": "0x116d8",
+      "file_offset": "0x96d8",
+      "primary_slot": 18,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp11handleEventEjjRKNS_6ParcelE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp16invokeDataUpdateEjRKNS_6ParcelE",
+      "elf_va": "0x6a65",
+      "offset": "0x54",
+      "word_elf_va": "0x116dc",
+      "file_offset": "0x96dc",
+      "primary_slot": 19,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp16invokeDataUpdateEjRKNS_6ParcelE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp16requestDataValueEj",
+      "elf_va": "0x5b69",
+      "offset": "0x58",
+      "word_elf_va": "0x116e0",
+      "file_offset": "0x96e0",
+      "primary_slot": 20,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp16requestDataValueEj"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp7onErrorEjRKNS_11BasicStringIcEE",
+      "elf_va": "0x5b3f",
+      "offset": "0x5c",
+      "word_elf_va": "0x116e4",
+      "file_offset": "0x96e4",
+      "primary_slot": 21,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp7onErrorEjRKNS_11BasicStringIcEE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp6onInitEv",
+      "elf_va": "0x5b31",
+      "offset": "0x60",
+      "word_elf_va": "0x116e8",
+      "file_offset": "0x96e8",
+      "primary_slot": 22,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp6onInitEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp10onFinalizeEv",
+      "elf_va": "0x5b39",
+      "offset": "0x64",
+      "word_elf_va": "0x116ec",
+      "file_offset": "0x96ec",
+      "primary_slot": 23,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp10onFinalizeEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp15getCapabilitiesERKSs",
+      "elf_va": "0x5b79",
+      "offset": "0x68",
+      "word_elf_va": "0x116f0",
+      "file_offset": "0x96f0",
+      "primary_slot": 24,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp15getCapabilitiesERKSs"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp19onCheckAppAvailableEv",
+      "elf_va": "0x5b8d",
+      "offset": "0x6c",
+      "word_elf_va": "0x116f4",
+      "file_offset": "0x96f4",
+      "primary_slot": 25,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp19onCheckAppAvailableEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp13handleMessageERKNS_7MessageE",
+      "elf_va": "0x6e9f",
+      "offset": "0x70",
+      "word_elf_va": "0x116f8",
+      "file_offset": "0x96f8",
+      "primary_slot": 26,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp13handleMessageERKNS_7MessageE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp20invokeCommandWithMapEjRKNS_3MapIjNS_7VariantEEE",
+      "elf_va": "0x6c5d",
+      "offset": "0x74",
+      "word_elf_va": "0x116fc",
+      "file_offset": "0x96fc",
+      "primary_slot": 27,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp20invokeCommandWithMapEjRKNS_3MapIjNS_7VariantEEE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp18updateModelWithMapEjRKNS_3MapIjNS_7VariantEEE",
+      "elf_va": "0x6c1d",
+      "offset": "0x78",
+      "word_elf_va": "0x11700",
+      "file_offset": "0x9700",
+      "primary_slot": 28,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp18updateModelWithMapEjRKNS_3MapIjNS_7VariantEEE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp18handleEventWithMapEjjRKNS_3MapIjNS_7VariantEEE",
+      "elf_va": "0x6d77",
+      "offset": "0x7c",
+      "word_elf_va": "0x11704",
+      "file_offset": "0x9704",
+      "primary_slot": 29,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp18handleEventWithMapEjjRKNS_3MapIjNS_7VariantEEE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp15invokeCDSUpdateERNS_11BasicStringIcEERNS1_ItEE",
+      "elf_va": "0x6149",
+      "offset": "0x80",
+      "word_elf_va": "0x11708",
+      "file_offset": "0x9708",
+      "primary_slot": 30,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp15invokeCDSUpdateERNS_11BasicStringIcEERNS1_ItEE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp23invokeVoiceStateChangedEt",
+      "elf_va": "0x5b95",
+      "offset": "0x84",
+      "word_elf_va": "0x1170c",
+      "file_offset": "0x970c",
+      "primary_slot": 31,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp23invokeVoiceStateChangedEt"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp22invokeAppManagerUpdateERKNS_11BasicStringIcEE",
+      "elf_va": "0x6173",
+      "offset": "0x88",
+      "word_elf_va": "0x11710",
+      "file_offset": "0x9710",
+      "primary_slot": 32,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp22invokeAppManagerUpdateERKNS_11BasicStringIcEE"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw9PluginApp14invokeSdsEventEjRKNS_3MapIjNS_7VariantEEE",
+      "elf_va": "0x5ba7",
+      "offset": "0x8c",
+      "word_elf_va": "0x11714",
+      "file_offset": "0x9714",
+      "primary_slot": 33,
+      "target_symbol_aliases": [
+        "_ZN3bmw9PluginApp14invokeSdsEventEjRKNS_3MapIjNS_7VariantEEE"
+      ]
+    },
+    {
+      "kind": "literal",
+      "raw": "0xfffffffc",
+      "elf_va": "0xfffffffc",
+      "offset": "0x90",
+      "word_elf_va": "0x11718",
+      "file_offset": "0x9718",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": []
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZTIN3bmw9PluginAppE",
+      "elf_va": "0x11668",
+      "offset": "0x94",
+      "word_elf_va": "0x1171c",
+      "file_offset": "0x971c",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": []
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZThn4_N3bmw9PluginAppD1Ev",
+      "elf_va": "0x635d",
+      "offset": "0x98",
+      "word_elf_va": "0x11720",
+      "file_offset": "0x9720",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": [
+        "_ZThn4_N3bmw9PluginAppD1Ev"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZThn4_N3bmw9PluginAppD0Ev",
+      "elf_va": "0x6377",
+      "offset": "0x9c",
+      "word_elf_va": "0x11724",
+      "file_offset": "0x9724",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": [
+        "_ZThn4_N3bmw9PluginAppD0Ev"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw16PluginAppHandler12nextExecTimeEv",
+      "elf_va": "0x87c5",
+      "offset": "0xa0",
+      "word_elf_va": "0x11728",
+      "file_offset": "0x9728",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": [
+        "_ZN3bmw16PluginAppHandler12nextExecTimeEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZN3bmw16PluginAppHandler8dispatchEv",
+      "elf_va": "0x86a1",
+      "offset": "0xa4",
+      "word_elf_va": "0x1172c",
+      "file_offset": "0x972c",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": [
+        "_ZN3bmw16PluginAppHandler8dispatchEv"
+      ]
+    },
+    {
+      "kind": "relocation",
+      "raw": "0x0",
+      "relocation_type": 2,
+      "symbol": "_ZThn4_N3bmw9PluginApp13handleMessageERKNS_7MessageE",
+      "elf_va": "0x7125",
+      "offset": "0xa8",
+      "word_elf_va": "0x11730",
+      "file_offset": "0x9730",
+      "region": "secondary_vtable_group",
+      "target_symbol_aliases": [
+        "_ZThn4_N3bmw9PluginApp13handleMessageERKNS_7MessageE"
+      ]
+    }
+  ]
+}

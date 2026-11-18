@@ -26,6 +26,28 @@
 !/tests/
 !/toolchain/
 !/tools/
+!/development/
+/development/*
+!/development/vehicle-telemetry/
+!/development/abi-146/
+/development/abi-146/*
+!/development/abi-146/scripts/
+!/development/abi-146/evidence/
+/development/abi-146/scripts/*
+!/development/abi-146/scripts/elf32.py
+/development/abi-146/evidence/*
+!/development/abi-146/evidence/_ZTVN3bmw9PluginAppE.vtable.json
+!/diagnostics/
+/diagnostics/*
+!/diagnostics/enet.py
+!/diagnostics/enet_ssh_proxy.py
+!/diagnostics/read_panel_sources.py
+!/diagnostics/read_egs_temperature.py
+!/diagnostics/test_panel_sources.py
+/development/vehicle-telemetry/**/build/
+/development/vehicle-telemetry/**/*.log
+/development/vehicle-telemetry/**/*.elf
+/development/vehicle-telemetry/**/*.a
 
 # Build outputs
 *.o

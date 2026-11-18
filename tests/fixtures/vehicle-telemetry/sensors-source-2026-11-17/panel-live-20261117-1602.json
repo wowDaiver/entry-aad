@@ -1,0 +1,109 @@
+{
+  "kind": "sanitized-fixed-telemetry-fixture",
+  "source_capture_sha256": "4d33222543a41f1425585079f917b9f78b11014895510e0d21e415a2bf64da35",
+  "results": [
+    {
+      "ecu": "0x12",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41222f150",
+      "frames": [
+        "000000050002f41222f150",
+        "00000008000112f462f1500f1ff0"
+      ],
+      "status": "positive",
+      "data_hex": "0f1ff0",
+      "length": 3
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x586f",
+      "name": "oil_pressure",
+      "request_hex": "000000050001f41222586f",
+      "frames": [
+        "000000050002f41222586f",
+        "00000006000112f462586fc8"
+      ],
+      "status": "positive",
+      "data_hex": "c8",
+      "length": 1
+    },
+    {
+      "ecu": "0x12",
+      "did": "0x402b",
+      "name": "battery_record",
+      "request_hex": "000000050001f41222402b",
+      "frames": [
+        "000000050002f41222402b",
+        "00000005000112f47f2231"
+      ],
+      "status": "negative",
+      "nrc": "0x31"
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xf150",
+      "name": "sgbd",
+      "request_hex": "000000050001f41822f150",
+      "frames": [
+        "000000050002f41822f150",
+        "00000008000118f462f1500f21d0"
+      ],
+      "status": "positive",
+      "data_hex": "0f21d0",
+      "length": 3
+    },
+    {
+      "ecu": "0x18",
+      "did": "0x6000",
+      "name": "gearbox_temperature",
+      "request_hex": "000000050001f418226000",
+      "frames": [
+        "000000050002f418226000",
+        "00000006000118f46260004a"
+      ],
+      "status": "positive",
+      "data_hex": "4a",
+      "length": 1
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xda2e",
+      "name": "selector_and_mode",
+      "request_hex": "000000050001f41822da2e",
+      "frames": [
+        "000000050002f41822da2e",
+        "00000007000118f462da2e0000"
+      ],
+      "status": "positive",
+      "data_hex": "0000",
+      "length": 2
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xda22",
+      "name": "converter_lock",
+      "request_hex": "000000050001f41822da22",
+      "frames": [
+        "000000050002f41822da22",
+        "00000007000118f462da220000"
+      ],
+      "status": "positive",
+      "data_hex": "0000",
+      "length": 2
+    },
+    {
+      "ecu": "0x18",
+      "did": "0xda2a",
+      "name": "shaft_speeds",
+      "request_hex": "000000050001f41822da2a",
+      "frames": [
+        "000000050002f41822da2a",
+        "00000009000118f462da2a02f10000"
+      ],
+      "status": "positive",
+      "data_hex": "02f10000",
+      "length": 4
+    }
+  ]
+}
