@@ -86,6 +86,8 @@ int main() {
         CHECK(option(g_handed, IPPROTO_TCP, TCP_NODELAY) == 1 && option(g_handed, SOL_SOCKET, SO_KEEPALIVE) == 1);
         CHECK(option(g_handed, IPPROTO_TCP, TCP_KEEPIDLE) == 10 && option(g_handed, IPPROTO_TCP, TCP_KEEPINTVL) == 3);
         CHECK(option(g_handed, IPPROTO_TCP, TCP_KEEPCNT) == 3);
+        // What the car sends goes in the Wi-Fi video category, as its CarPlay marks its screen stream.
+        CHECK(option(g_handed, IPPROTO_IP, IP_TOS) == 0x80);
         // One session at a time, until the session says it ended.
         CHECK(turnedAway(dial(port)) && g_calls == 1);
         server.notifySessionEnded();

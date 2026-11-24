@@ -23,6 +23,8 @@
 //   car_signals    gear, phone calls, day/night and driving mode from the car's CDS
 //   hold_machine   iDrive kept on the blank state while Android Auto is on screen (pure, tested on the PC)
 //   pending_restart  the restart the USB checkbox asks for while Android Auto runs (pure, tested on the PC)
+// The menu also keeps the logs (maintenance profile), copies them onto a USB stick (platform/log_copy.hpp) and updates
+// Android Auto from one (update_flow.hpp, platform/update_install.hpp).
 // Uninstall: delete the plugin folder and reboot.
 #include <dlfcn.h>
 #include <stdint.h>
@@ -31,17 +33,21 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../platform/log_copy.hpp"
+#include "../platform/media_recall.hpp"
 #include "../platform/service_contract.hpp"
 #include "app_guards.hpp"
 #include "app_log.hpp"
 #include "bmw_framework.hpp"
 #include "car_signals.hpp"
 #include "hold_machine.hpp"
+#include "idrive_coding.hpp"
 #include "mono_clock.hpp"
 #include "pending_restart.hpp"
 #include "rhmi_ids.hpp"
 #include "service_link.hpp"
 #include "service_state.hpp"
+#include "update_flow.hpp"
 
 namespace evo {
 namespace app {
@@ -53,7 +59,7 @@ const unsigned kSpinMs = 200;
 
 bmw::PluginApp* g_app = nullptr;     // created by HmiMain3D, until destroyed
 bmw::PluginApp* g_runApp = nullptr;  // initialized, until finalized: the posted tasks run while it is set
-time_t g_initTime = 0;
+long g_initTime = 0;                 // monoSeconds() when onInit ran
 
 // ---- the hold (hmiapp/hold_machine.hpp): iDrive's focus in, iDrive events and control messages out ------------------
 class AppHoldIo : public HoldIo {
@@ -61,6 +67,11 @@ public:
     void triggerEvent(unsigned event) override {
         if (g_app) {
             g_app->triggerEvent(event);
+        }
+    }
+    void ownPopup(bool open) override {
+        if (g_app) {
+            g_app->triggerEvent(kEvOwnPopup, bmw::Parcel(open));
         }
     }
     void send(const char* message) override { sendToService(message); }
@@ -142,13 +153,14 @@ bool g_settingsShown = false;
 void showSettings(bmw::PluginApp* app) {
     app->updateModel(kAutostartModel, autostartOn());
     app->updateModel(kUsbCableModel, usbCableOn());
+    app->updateModel(kKeepLogsModel, keepLogsOn());
     g_settingsShown = true;
 }
 PendingRestart g_restart;  // the USB checkbox changed while Android Auto ran
 
 bool guardedByOverlay(const char* what) {
     ServiceState d = readServiceState();
-    if (d.pid > 0 && d.overlay) {
+    if (d.onScreen()) {
         alog("%s ignored: Android Auto is on screen (stray knob input)", what);
         return true;
     }
@@ -256,6 +268,119 @@ bool onUsbCableToggle(void*, const bmw::Parcel&) {
     return true;
 }
 
+// "Keep logs": the maintenance profile's file, so the logs need no SSH either.
+bool onKeepLogsToggle(void*, const bmw::Parcel&) {
+    if (!guardedByOverlay("keep logs")) {
+        toggleKeepLogs();
+    }
+    if (g_runApp) {
+        showSettings(g_runApp);
+    }
+    return true;
+}
+
+// "Copy logs to USB stick": the button's text says what happens, then what came of it, for kCopyResultS.
+const long kCopyResultS = 15;
+unsigned g_copyText = kTextCopyLogs;
+long g_copyShownAt = 0;
+
+void showCopyText(bmw::PluginApp* app, unsigned text) {
+    if (text != g_copyText) {
+        bmw::TextID id(text);
+        app->updateModel(kCopyLogsModel, id);
+        g_copyText = text;
+    }
+    g_copyShownAt = monoSeconds();
+}
+
+unsigned copyResultText(int code) {
+    if (code == static_cast<int>(LogCopyResult::kCopied)) {
+        return kTextCopied;
+    }
+    if (code == static_cast<int>(LogCopyResult::kNoStick)) {
+        return kTextNoStick;
+    }
+    if (code == static_cast<int>(LogCopyResult::kNothingToCopy)) {
+        return kTextNoLogs;
+    }
+    return kTextCopyFailed;
+}
+
+bool onCopyLogs(void*, const bmw::Parcel&) {
+    alog("menu: copy logs (raAction %u)", kActCopyLogs);
+    if (guardedByOverlay("copy logs") || logCopyRunning()) {
+        return true;
+    }
+    if (g_runApp && startLogCopy()) {
+        showCopyText(g_runApp, kTextCopying);
+    } else if (g_runApp) {
+        showCopyText(g_runApp, kTextCopyFailed);
+    }
+    return true;
+}
+
+void pollLogCopy(bmw::PluginApp* app) {
+    const int ended = logCopyEnded(monoSeconds());
+    if (ended != -1) {
+        showCopyText(app, copyResultText(ended));
+    } else if (g_copyText != kTextCopyLogs && g_copyText != kTextCopying &&
+               monoSeconds() - g_copyShownAt >= kCopyResultS) {
+        showCopyText(app, kTextCopyLogs);
+    }
+}
+
+// "Update from USB stick" (hmiapp/update_flow.hpp): a press checks the stick; a second one installs.
+UpdateFlow g_update;
+unsigned g_updateText = kTextUpdate;
+
+// Android Auto runs, or its supervisor is still giving the Bluetooth back; and whether the unit may restart now.
+UpdateFlow::Car updateCar() {
+    UpdateFlow::Car car;
+    car.androidAuto = stopInProgress() || readServiceState().pid != 0 || supervisorRunning();
+    car.mayRestart = !callActive() && lastGear() != kReverseGear;
+    return car;
+}
+
+void updateStep(bmw::PluginApp* app, UpdateFlow::Step step) {
+    const long now = monoSeconds();
+    if (step == UpdateFlow::kStartCheck && !startUpdate(false)) {
+        g_update.startFailed(now);
+    } else if (step == UpdateFlow::kStartInstall && !startUpdate(true)) {
+        g_update.startFailed(now);
+    } else if (step == UpdateFlow::kStopAndroidAuto) {
+        alog("update: stopping Android Auto before the install");
+        g_restart.cancel();
+        beginStop();
+    }
+    holdServiceStarts(g_update.holdsAndroidAuto());
+    if (g_update.takeRestart()) {
+        alog("update: nothing installed, starting Android Auto again");
+        forgetBootGuard();
+        launchService();
+    }
+    if (app && g_update.text() != g_updateText) {
+        bmw::TextID id(g_update.text());
+        app->updateModel(kUpdateModel, id);
+        g_updateText = g_update.text();
+    }
+}
+
+bool onUpdate(void*, const bmw::Parcel&) {
+    alog("menu: update from USB stick (raAction %u)", kActUpdate);
+    if (!guardedByOverlay("update")) {
+        updateStep(g_runApp, g_update.press(monoSeconds(), updateCar()));
+    }
+    return true;
+}
+
+void pollUpdate(bmw::PluginApp* app) {
+    const int ended = updateEnded(monoSeconds());
+    if (ended != -1) {
+        g_update.ended(ended, monoSeconds());
+    }
+    updateStep(app, g_update.poll(monoSeconds(), updateCar()));
+}
+
 // ---- the status poll: service state -> entry text, menu rows, hold, stop --------------------------------------------
 AppRunnable g_statusRunnable;
 unsigned g_shownText = kTextDefault;
@@ -305,6 +430,15 @@ void statusRun(void*) {
     }
     // A (re)started service knows neither: started in reverse, Android Auto would come up over the camera.
     g_hold.tellService(d);
+    if (takeMediaRecall(contract::kMediaRecallFile, d.pid, static_cast<uint32_t>(monoMs()))) {
+        // Consume even a blocked request: ending a call or leaving reverse must never replay it later.
+        const ServiceState current = readServiceState();
+        if (current.pid == d.pid && current.overlay == 0 && readyToShow(current)) {
+            g_hold.showAndHold("double MEDIA", monoSeconds());
+        } else {
+            alog("double MEDIA ignored: disconnected, visible, stopping, call or reverse");
+        }
+    }
     unsigned row = connected ? kTextRowOpen : connecting ? kTextRowConnecting : kTextStart;
     if (row != g_shownRow) {
         bmw::TextID text(row);
@@ -313,6 +447,8 @@ void statusRun(void*) {
         g_shownRow = row;
     }
     g_hold.poll(d, monoSeconds());
+    pollLogCopy(app);
+    pollUpdate(app);
     postRunnable(app, g_statusRunnable, kStatusPollMs);
 }
 
@@ -333,12 +469,17 @@ bool appOnInit(bmw::PluginApp* self) {
     addAction(self, kActEntry, &onEntry);
     addAction(self, kActAutostart, &onAutostartToggle);
     addAction(self, kActUsbCable, &onUsbCableToggle);
+    addAction(self, kActKeepLogs, &onKeepLogsToggle);
+    addAction(self, kActCopyLogs, &onCopyLogs);
+    addAction(self, kActUpdate, &onUpdate);
     addStateHandler(self, kMenuState, kHandlerFocus, &onMenuFocus);
     addStateHandler(self, kHelpState, kHandlerFocus, &onHelpFocus);
     addStateHandler(self, kAaState, kHandlerFocus, &onAaFocus);
     addStateHandler(self, kAaState, kHandlerVisible, &onAaVisible);
-    g_initTime = time(nullptr);
+    g_initTime = monoSeconds();
     bool ok = self->onInit();
+    writeIdriveCoding();   // the car's keys, brand and driver's side, for the service
+    readDriveModePopup();  // only logged here: read again at each driving mode change
     alog("onInit: handlers registered, base onInit -> %d, start automatically %s, USB cable %s", static_cast<int>(ok),
          autostartOn() ? "on" : "off", usbCableOn() ? "on" : "off");
     g_runApp = self;

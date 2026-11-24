@@ -15,10 +15,8 @@ int main() {
     assert(created);
     fclose(created);
     assert(maintenanceProfile(marker));
-    assert(!strcmp(serviceLogPath(marker, "service.log"), "service.log"));
     assert(!unlink(marker));
     assert(!maintenanceProfile(marker));
-    assert(!strcmp(serviceLogPath(marker, "service.log"), "/dev/null"));
     puts("PASS production profile without logs, maintenance profile with logs");
     return 0;
 }

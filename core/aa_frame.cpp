@@ -40,38 +40,55 @@ bool encodeFrame(uint8_t channel, uint8_t flags, const uint8_t* payload, size_t 
 
 MessageAssembler::Outcome MessageAssembler::add(const FrameHeader& header, const std::vector<uint8_t>& payload,
                                                 std::vector<uint8_t>& message) {
-    Pending& pending = pending_[header.channel];
-    if (pending.data.size() + payload.size() > frame::kMaxMessage) {
-        pending_.erase(header.channel);
-        return kOverflow;
+    const uint8_t position = header.position();
+    if (position == frame::kWhole) {
+        // A message of its own, one frame long: what is being assembled or skipped on the channel stays as it is.
+        if (payload.size() > frame::kMaxMessage) {
+            return kOverflow;
+        }
+        message = payload;
+        return kComplete;
     }
-    switch (header.position()) {
-        case frame::kWhole:
-            message = payload;
-            return kComplete;
-        case frame::kFirst:
-            pending.data = payload;
-            pending.sized = true;
-            pending.size = header.totalSize;
-            pending.onWire = header.length;
-            return kPending;
-        case frame::kMiddle:
-            pending.data.insert(pending.data.end(), payload.begin(), payload.end());
-            pending.onWire += header.length;
-            return kPending;
-        default:
-            break;
+    if (position == frame::kFirst) {
+        // Replaces an unfinished message, or ends the tail of a lost one whose LAST never came.
+        if (payload.size() > frame::kMaxMessage) {
+            forget(header.channel, position);
+            return kOverflow;
+        }
+        Pending& pending = pending_[header.channel];
+        pending.data = payload;
+        pending.lostTail = false;
+        pending.size = header.totalSize;
+        pending.onWire = header.length;
+        return kPending;
     }
-    // LAST. Fragments without a FIRST still count as a start once they brought data.
-    const bool started = pending.sized || !pending.data.empty();
-    const uint32_t onWire = pending.onWire + header.length;
-    const uint32_t size = pending.sized ? pending.size : 0;
-    pending.data.insert(pending.data.end(), payload.begin(), payload.end());
-    message.swap(pending.data);
-    pending_.erase(header.channel);
-    if (!started) {
+    const std::map<uint8_t, Pending>::iterator it = pending_.find(header.channel);
+    if (it == pending_.end()) {
+        forget(header.channel, position);
         return kNoFirst;
     }
+    Pending& pending = it->second;
+    if (pending.lostTail) {
+        if (position == frame::kLast) {
+            pending_.erase(it);
+        }
+        return kRestOfLost;
+    }
+    if (payload.size() > frame::kMaxMessage - pending.data.size()) {
+        forget(header.channel, position);
+        return kOverflow;
+    }
+    if (position == frame::kMiddle) {
+        pending.data.insert(pending.data.end(), payload.begin(), payload.end());
+        pending.onWire += header.length;
+        return kPending;
+    }
+    // LAST closes the message started by FIRST.
+    const uint32_t onWire = pending.onWire + header.length;
+    const uint32_t size = pending.size;
+    pending.data.insert(pending.data.end(), payload.begin(), payload.end());
+    message.swap(pending.data);
+    pending_.erase(it);
     // The announced size counts plain bytes and the length fields count TLS records, which are larger: only a
     // shortfall tells that this LAST closed an incomplete message.
     if (size != 0 && onWire < size) {
@@ -80,6 +97,20 @@ MessageAssembler::Outcome MessageAssembler::add(const FrameHeader& header, const
         return kShortOfSize;
     }
     return kComplete;
+}
+
+void MessageAssembler::lose(const FrameHeader& header) {
+    if (header.position() != frame::kWhole) {
+        forget(header.channel, header.position());
+    }
+}
+
+// Erased first, so that what was gathered is freed; a LAST leaves nothing of its message to skip.
+void MessageAssembler::forget(uint8_t channel, uint8_t position) {
+    pending_.erase(channel);
+    if (position != frame::kLast) {
+        pending_[channel].lostTail = true;
+    }
 }
 
 }  // namespace aa

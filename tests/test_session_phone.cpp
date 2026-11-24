@@ -21,9 +21,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -92,6 +94,12 @@ const uint8_t kSealedCtl = 0x0f;  // whole message, encrypted, control message o
 const uint32_t kKeyHome = 3, kKeyBack = 4, kKeyUp = 19, kRotary = 65536;
 
 const int kWaitMs = 4000;  // per frame; under the head unit's 5 s silence limit, ample under QEMU
+
+long long monotonicMs() {
+    timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return static_cast<long long>(t.tv_sec) * 1000 + t.tv_nsec / 1000000;
+}
 
 Bytes bytes(std::initializer_list<int> list) {
     Bytes out;
@@ -375,9 +383,25 @@ public:
         const bool first = (flags & 0x03) == 0x01;
         frame(channel, flags, (flags & 0x08) ? tls_.seal(data) : data, first ? &total : nullptr);
     }
+    // A MIDDLE (0x08) fragment whose TLS record is cut after its 5-byte header, over two frames: the head unit cannot
+    // decrypt the first frame by itself, the second brings the rest of the record, and the stream stays readable.
+    void cutRecord(uint8_t channel, uint8_t flags, const Bytes& data) {
+        log_.push_back(format("ph ch=%u fl=%02x piece ", channel, flags) + hex(data) +
+                       ", its record cut over 2 frames");
+        const Bytes records = tls_.seal(data);
+        frame(channel, flags, Bytes(records.begin(), records.begin() + 5), nullptr);
+        frame(channel, flags, Bytes(records.begin() + 5, records.end()), nullptr);
+    }
     void raw(const char* what, const Bytes& data) {
         log_.push_back(std::string("ph raw ") + what + " " + hex(data));
         writeAll(data);
+    }
+    // A whole encrypted message whose record fails its check: one bit flipped in its last byte (the MAC).
+    void corrupted(uint8_t channel, const Bytes& message) {
+        log_.push_back(format("ph ch=%u fl=%02x ", channel, kSealed) + hex(message) + ", its record corrupted");
+        Bytes records = tls_.seal(message);
+        records[records.size() - 1] ^= 0x01;
+        frame(channel, kSealed, records, nullptr);
     }
     // A ping, then every head unit frame up to its answer: whatever was sent or posted before has been handled.
     void settle() {
@@ -428,6 +452,32 @@ public:
         }
     }
     void setQuiet(bool quiet) { quiet_ = quiet; }
+    // The phone says nothing of its own for ms milliseconds, and counts the head unit's encrypted pings, answering
+    // each with the same timestamp when asked to. Stops early when the head unit closes.
+    int headUnitPings(int ms, bool answer) {
+        int asked = 0;
+        const long long until = monotonicMs() + ms;
+        while (!lost_) {
+            const long long left = until - monotonicMs();
+            pollfd pfd = {fd_, POLLIN, 0};
+            if (left <= 0 || poll(&pfd, 1, static_cast<int>(left)) <= 0) {
+                break;
+            }
+            uint8_t channel = 0, flags = 0;
+            Bytes message;
+            if (receive(channel, flags, message) <= 0) {
+                break;
+            }
+            if (channel == 0 && flags == kSealed && message.size() > 2 && message[0] == 0x00 && message[1] == 0x0b) {
+                ++asked;
+                if (answer) {
+                    send(0, kSealed, bytes({0x00, 0x0c}) + Bytes(message.begin() + 2, message.end()));
+                }
+            }
+        }
+        return asked;
+    }
+    bool lost() const { return lost_; }
 
 private:
     void frame(uint8_t channel, uint8_t flags, const Bytes& payload, const uint32_t* total) {
@@ -788,6 +838,11 @@ void fullSession(std::vector<std::string>& log) {
     phone.send(0, kSealed, bytes({0x00, 0x0f, 0x08, 0x01}));
     phone.untilClosed();
     ended(link, log);
+    // The service tells a lost session (which closes the phone's Bluetooth link to start again) from this one.
+    if (!s.phoneSaidGoodbye()) {
+        fprintf(stderr, "FAIL the session forgot the phone's ByeBye\n");
+        exit(1);
+    }
 }
 
 // Fragments in odd orders, short messages, a frame that does not decrypt, then the phone leaves.
@@ -836,6 +891,13 @@ void fragmentEdges(std::vector<std::string>& log) {
     phone.send(6, kSealed, bytes({0x05}));
     phone.send(8, kSealed, bytes({0x05}));
     phone.settle();
+    log.push_back("-- a fragment that does not decrypt: the rest of its message skipped, a whole one passes, one ack");
+    phone.piece(6, 0x09, head, static_cast<uint32_t>(video.size()));
+    phone.cutRecord(6, 0x08, counting(6, 0x6c));
+    phone.send(6, kSealed, bytes({0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x98}));
+    phone.piece(6, 0x08, counting(6, 0x72));
+    phone.piece(6, 0x0a, tail);
+    phone.settle();
     log.push_back("-- a second version response restarts TLS");
     phone.send(0, kPlain, bytes({0x00, 0x02, 0x00, 0x01, 0x00, 0x06, 0x00, 0x00}));
     phone.settle();
@@ -844,6 +906,10 @@ void fragmentEdges(std::vector<std::string>& log) {
     phone.settle();
     phone.leave();
     ended(link, log);
+    if (link.session.phoneSaidGoodbye()) {
+        fprintf(stderr, "FAIL a phone that left without ByeBye counted as a goodbye\n");
+        exit(1);
+    }
 }
 
 // Without TLS: what still works, an overflowing reassembly, a frame cut short.
@@ -962,6 +1028,239 @@ void lifecycle(std::vector<std::string>& log) {
     ended(link, log);
 }
 
+// A phone that stops speaking by itself (iDrive has the screen, no music) keeps its session as long as it answers the
+// head unit's pings; one that answers nothing loses it within the 5 s silence limit, pings or not. Run on the clock,
+// so it is checked here and kept out of the golden. An empty verdict: passed.
+std::string quietPhone() {
+    std::vector<std::string> log;
+    Link link;
+    Phone phone(link.phoneFd, log);
+    phone.handshake();
+    phone.discover();
+    const int answered = phone.headUnitPings(8000, true);  // without pings, the session would end after 5 s
+    if (!link.session.isActive() || phone.lost() || answered < 3) {
+        return format("answering phone: session active=%d, %d pings in 8 s", link.session.isActive() ? 1 : 0, answered);
+    }
+    const long long since = monotonicMs();
+    const int ignored = phone.headUnitPings(9000, false);
+    const long long lasted = monotonicMs() - since;
+    // The last answer came up to 2 s before; the silence is checked about once a second.
+    if (!phone.lost() || !waitEnded(link.session) || ignored < 2 || lasted < 2500 || lasted > 7500) {
+        return format("silent phone: closed=%d, %d pings, ended after %lld ms", phone.lost() ? 1 : 0, ignored, lasted);
+    }
+    return std::string();
+}
+
+// Encrypted frames that never give a whole record: the first one announces an application record of 16 KB, the next
+// ones bring a few bytes of it each. TLS waits for the rest, it does not fail.
+void unreadable(Phone& phone, bool first) {
+    phone.raw("unreadable", first ? bytes({0x00, kSealed, 0x00, 0x05, 0x17, 0x03, 0x03, 0x40, 0x00})
+                                  : bytes({0x00, kSealed, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04}));
+}
+
+// A record that never completes: 15 frames in a row that give nothing are survived, the 16th ends the session.
+std::string brokenStream() {
+    std::vector<std::string> log;
+    Link link;
+    Phone phone(link.phoneFd, log);
+    phone.handshake();
+    phone.discover();
+    for (int i = 0; i < 15; ++i) {
+        unreadable(phone, i == 0);
+    }
+    phone.settle();  // a plain ping, still answered
+    if (!link.session.isActive() || phone.lost()) {
+        return "15 unreadable frames ended the session";
+    }
+    unreadable(phone, false);
+    if (!waitEnded(link.session)) {
+        return "the 16th unreadable frame in a row did not end the session";
+    }
+    return std::string();
+}
+
+// A record that fails its check is fatal to TLS: no later record decrypts, the good ones neither. The session ends at
+// that frame, and sends nothing more: the dropped video was acked with whatever OpenSSL left behind, its alert.
+std::string corruptedRecord() {
+    std::vector<std::string> log;
+    Link link;
+    Phone phone(link.phoneFd, log);
+    phone.handshake();
+    phone.discover();
+    log.clear();
+    phone.corrupted(6, bytes({0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0x2a, 0x60, 0x61}));
+    if (!waitEnded(link.session)) {
+        return "a corrupted record did not end the session";
+    }
+    phone.untilClosed();
+    for (size_t i = 0; i < log.size(); ++i) {
+        if (log[i].compare(0, 3, "hu ") == 0 && log[i] != "hu <closed>") {
+            return "the head unit still sent \"" + log[i] + "\" after a corrupted record";
+        }
+    }
+    return std::string();
+}
+
+// A phone whose Wi-Fi stalls takes nothing in while it still speaks: the head unit's send gives up partway through a
+// frame, and whatever followed would be garbage to the phone. The session must end there, as lost and not as a
+// goodbye. The head unit gives a stuck send 5 s (set by start()); to stay fast, the test shortens that on the head
+// unit's end of its own socketpair when the phone stops reading, and shrinks that end's send buffer so that a few
+// microphone chunks fill it.
+std::string stalledSend() {
+    const int kSendBuffer = 4096;            // the kernel doubles it: about two 4 KiB pieces fit
+    const timeval kSendLimit = {0, 300000};  // instead of the head unit's 5 s
+    const long long kEndWithinMs = 3000;     // a session that carries on is still there after this
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        return "socketpair";
+    }
+    aa::AASession session;
+    watch(session, true);
+    if (!session.start(fds[0])) {
+        close(fds[1]);
+        return "session start";
+    }
+    std::vector<std::string> log;
+    Phone phone(fds[1], log);
+    phone.handshake();
+    phone.discover();
+    phone.send(14, kSealed, bytes({0x80, 0x05, 0x08, 0x01}));  // the phone opens the car microphone
+    phone.settle();
+    takeEvents();
+    std::string verdict;
+    if (!session.isActive() || phone.lost()) {
+        verdict = "the session did not get as far as the microphone";
+    } else {
+        // From here the phone reads nothing, but it keeps sending microphone acks: silence cannot end the session.
+        // The head unit's end is still open: the session is active.
+        setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &kSendBuffer, sizeof(kSendBuffer));
+        setsockopt(fds[0], SOL_SOCKET, SO_SNDTIMEO, &kSendLimit, sizeof(kSendLimit));
+        const Bytes chunk(8192, 0x5a);
+        for (int i = 0; i < 8; ++i) {
+            session.postMicData(&chunk[0], chunk.size());
+        }
+        const long long since = monotonicMs();
+        while (session.isActive() && monotonicMs() - since < kEndWithinMs) {
+            phone.send(14, kSealed, bytes({0x80, 0x04, 0x08, 0x00, 0x10, 0x01}));
+            usleep(100000);
+        }
+        // The session thread clears its running flag before it calls the ended callback: joined first, so that the
+        // callback has run (on a slow machine the flag can be read in between).
+        const bool active = session.isActive();
+        session.stop();
+        const std::vector<std::string> events = takeEvents();
+        bool endedCallback = false;
+        for (size_t i = 0; i < events.size(); ++i) {
+            endedCallback = endedCallback || events[i] == "ended";
+        }
+        if (active) {
+            verdict = format("still running %lld ms after its send to the phone stalled", kEndWithinMs);
+        } else if (!endedCallback || session.phoneSaidGoodbye()) {
+            verdict = format("ended without its callback (%d) or as a goodbye (%d)", endedCallback ? 1 : 0,
+                             session.phoneSaidGoodbye() ? 1 : 0);
+        }
+    }
+    session.stop();
+    close(fds[1]);
+    takeEvents();
+    return verdict;
+}
+
+// The video focus indications the head unit sent, in order: "1" FOCUSED, "2" UNFOCUSED, each followed by 'u' when
+// unrequested.
+std::string focusTrail(const std::vector<std::string>& log, size_t from) {
+    std::string trail;
+    for (size_t i = from; i < log.size(); ++i) {
+        const size_t at = log[i].find("hu ch=6 fl=0b 8008 08");
+        if (at != std::string::npos && log[i].size() >= at + 27) {
+            trail += log[i][at + 22];
+            trail += log[i].compare(at + 23, 4, "1001") == 0 ? "u" : "";
+        }
+    }
+    return trail;
+}
+
+// A frame the decoder lost: no request during the video's first 5 s, then the focus off and on, once in 10 s.
+std::string keyframeAfterLoss() {
+    std::vector<std::string> log;
+    Link link;
+    Phone phone(link.phoneFd, log);
+    phone.handshake();
+    phone.discover();
+    phone.send(6, kSealedCtl, bytes({0x00, 0x07, 0x08, 0x00, 0x10, 0x06}));
+    phone.send(6, kSealed, bytes({0x80, 0x00, 0x08, 0x03}));  // video setup: FOCUSED at once
+    phone.settle();
+    size_t from = log.size();
+    link.session.postKeyframeRequest();
+    phone.settle();
+    if (!focusTrail(log, from).empty()) {
+        return "a keyframe was asked during the video's first seconds: " + focusTrail(log, from);
+    }
+    phone.headUnitPings(5200, true);
+    from = log.size();
+    link.session.postKeyframeRequest();
+    phone.settle();
+    if (focusTrail(log, from) != "2u1u") {
+        return "after 5 s, focus trail '" + focusTrail(log, from) + "' instead of off then on";
+    }
+    from = log.size();
+    link.session.postKeyframeRequest();
+    phone.settle();
+    if (!focusTrail(log, from).empty() || !link.session.isActive()) {
+        return "a second request within 10 s was not held back";
+    }
+    return std::string();
+}
+
+void giveUpOnVideo(uint32_t, const uint8_t*, size_t, uint64_t, void* user) {
+    static_cast<aa::AASession*>(user)->giveUp();
+}
+
+// The car gives the session up from its video callback (a stalled decoder): the session closes the phone's
+// connection at once, long before its silence limit would, and ends as when the phone is gone, its ended callback
+// included, not as a goodbye.
+std::string carGivesUp() {
+    aa::AASession session;
+    watch(session, true);
+    session.setVideoFrameCallback(giveUpOnVideo, &session);
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        return "socketpair";
+    }
+    if (!session.start(fds[0])) {
+        close(fds[1]);
+        return "session start";
+    }
+    std::vector<std::string> log;
+    Phone phone(fds[1], log);
+    phone.handshake();
+    phone.discover();
+    phone.send(6, kSealed, bytes({0x80, 0x00}));
+    phone.send(6, kSealed, bytes({0x80, 0x01, 0x08, 0x03}));
+    phone.settle();
+    takeEvents();
+    const bool before = session.isActive();
+    const long long since = monotonicMs();
+    phone.send(6, kSealed, bytes({0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0x01, 0x65}));
+    phone.untilClosed();
+    const long long closedAfter = monotonicMs() - since;
+    const bool ended = waitEnded(session);
+    const bool goodbye = session.phoneSaidGoodbye();
+    session.stop();  // joins the thread: its ended callback has run
+    close(fds[1]);
+    const std::vector<std::string> events = takeEvents();
+    const bool endedCallback = std::find(events.begin(), events.end(), "ended") != events.end();
+    // Under the 2 s after which a silent phone gets pings, and far under the 5 s that would end the session anyway.
+    if (!before || !ended || log.empty() || log.back() != "hu <closed>" || closedAfter >= 1500) {
+        return format("active before=%d, ended=%d, connection closed=%d after %lld ms", before ? 1 : 0, ended ? 1 : 0,
+                      !log.empty() && log.back() == "hu <closed>" ? 1 : 0, closedAfter);
+    }
+    if (!endedCallback || goodbye) {
+        return format("ended callback=%d, counted as a goodbye=%d", endedCallback ? 1 : 0, goodbye ? 1 : 0);
+    }
+    return std::string();
+}
+
 struct Scenario {
     const char* name;
     void (*run)(std::vector<std::string>&);
@@ -972,6 +1271,76 @@ const Scenario kScenarios[] = {{"full session", fullSession},
                                {"plain edges", plainEdges},
                                {"cut headers", cutHeaders},
                                {"lifecycle", lifecycle}};
+
+struct StreamFrames {
+    size_t received = 0;
+    bool valid = true;
+};
+
+void checkStreamFrame(uint32_t, const uint8_t* data, size_t len, uint64_t pts, void* user) {
+    auto& frames = *static_cast<StreamFrames*>(user);
+    frames.valid = frames.valid && len == pts && len != 0 && data[0] == 0x65 && data[len - 1] == 0x65;
+    ++frames.received;
+}
+
+void streamFrame(Phone& phone, size_t size, bool fragmented, const Bytes& chunk) {
+    const Bytes header =
+        bytes({0, 0, 0, 0, 0, 0, static_cast<int>((size >> 24) & 0xff), static_cast<int>((size >> 16) & 0xff),
+               static_cast<int>((size >> 8) & 0xff), static_cast<int>(size & 0xff)});
+    if (!fragmented) {
+        phone.send(6, kSealed, header + chunk);
+        return;
+    }
+    phone.piece(6, 0x09, header + chunk, static_cast<uint32_t>(header.size() + size));
+    for (size_t left = size - chunk.size(); left > chunk.size(); left -= chunk.size()) {
+        phone.piece(6, 0x08, chunk);
+    }
+    phone.piece(6, 0x0a, chunk);
+}
+
+bool streamVideo(long count) {
+    StreamFrames frames;
+    aa::AASession session;
+    watch(session, true);
+    session.setVideoFrameCallback(checkStreamFrame, &frames);
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+        perror("oversized video socketpair");
+        return false;
+    }
+    if (!session.start(fds[0])) {
+        close(fds[1]);
+        return false;
+    }
+    std::vector<std::string> log;
+    Phone phone(fds[1], log);
+    phone.handshake();
+    phone.discover();
+    phone.send(6, kSealed, bytes({0x80, 0x00}));
+    phone.send(6, kSealed, bytes({0x80, 0x01, 0x08, 0x03}));
+    phone.settle();
+    phone.setQuiet(true);
+    const Bytes chunk(8192, 0x65);
+    for (long i = 0; i < count && !phone.lost(); ++i) {
+        const bool fragmented = i % 4 == 0;
+        const size_t size = fragmented ? 129 * chunk.size() : chunk.size();
+        streamFrame(phone, size, fragmented, chunk);
+        if (i == 0) {
+            phone.piece(6, 0x09, chunk, 3 * chunk.size());
+            phone.piece(6, 0x0a, chunk);  // Too short: the announced size is larger than these two TLS records.
+        }
+        phone.settle();
+        log.clear();
+    }
+    const bool exchanged = !phone.lost();
+    phone.leave();
+    const bool ended = waitEnded(session);
+    session.stop();
+    close(fds[1]);
+    takeEvents();
+    return exchanged && !log.empty() && log.back() == "hu <closed>" && ended && frames.valid &&
+           frames.received == static_cast<size_t>(count);
+}
 
 void timedOut(int) {
     static const char msg[] = "FAIL test-session-phone: no progress\n";
@@ -1040,6 +1409,18 @@ int main(int argc, char** argv) {
             out.push_back("cb " + events[k]);
         }
     }
+    const std::string quiet = writing ? std::string() : quietPhone();
+    takeEvents();
+    const std::string broken = writing ? std::string() : brokenStream();
+    takeEvents();
+    const std::string corrupted = writing ? std::string() : corruptedRecord();
+    takeEvents();
+    const std::string stalled = writing ? std::string() : stalledSend();
+    const std::string keyframe = writing ? std::string() : keyframeAfterLoss();
+    takeEvents();
+    const std::string givenUp = writing ? std::string() : carGivesUp();
+    takeEvents();
+    const bool oversized = writing || streamVideo(2);
     fflush(stdout);
     dup2(console, 1);
     close(sink);
@@ -1074,5 +1455,40 @@ int main(int argc, char** argv) {
         "PASS session with a fake phone: %u lines as the golden (TLS handshake, discovery, every channel, car input "
         "queues, odd fragments, cut frames, start/stop)\n",
         static_cast<unsigned>(out.size()));
+    if (!quiet.empty()) {
+        printf("FAIL session, quiet phone: %s\n", quiet.c_str());
+        return 1;
+    }
+    puts("PASS session, quiet phone: answered pings keep it, unanswered ones end it within the silence limit");
+    if (!broken.empty()) {
+        printf("FAIL session, broken stream: %s\n", broken.c_str());
+        return 1;
+    }
+    puts("PASS session, broken stream: 16 encrypted frames in a row that give no record end it, 15 do not");
+    if (!corrupted.empty()) {
+        printf("FAIL session, corrupted record: %s\n", corrupted.c_str());
+        return 1;
+    }
+    puts("PASS session, corrupted record: it ends the session at once, nothing more is sent");
+    if (!stalled.empty()) {
+        printf("FAIL session, stalled send: %s\n", stalled.c_str());
+        return 1;
+    }
+    puts("PASS session, stalled send: a send that gives up partway through a frame ends it as lost");
+    if (!keyframe.empty()) {
+        printf("FAIL session, keyframe after a lost frame: %s\n", keyframe.c_str());
+        return 1;
+    }
+    puts("PASS session, keyframe after a lost frame: focus off and on, not in the first 5 s, once in 10 s");
+    if (!givenUp.empty()) {
+        printf("FAIL session, given up by the car: %s\n", givenUp.c_str());
+        return 1;
+    }
+    puts("PASS session, given up by the car from its video callback: connection closed, ended, not a goodbye");
+    if (!oversized) {
+        fprintf(stderr, "FAIL session, oversized fragmented video followed by small video\n");
+        return 1;
+    }
+    puts("PASS session, oversized fragmented video followed by small video");
     return 0;
 }

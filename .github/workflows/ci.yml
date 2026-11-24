@@ -40,3 +40,17 @@ jobs:
       - name: PC tests
         run: make test-host HOST_CXX=g++
 
+  sanitizers:
+    name: PC sanitizers (ASan, UBSan, leaks)
+    runs-on: ubuntu-24.04
+    container: debian:12
+    timeout-minutes: 10
+    steps:
+      - name: Install the tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates g++ git libssl-dev make
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Frame and session tests with sanitizers
+        run: make -j2 test-host-sanitizers
+

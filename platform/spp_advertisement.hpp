@@ -38,13 +38,14 @@ inline std::vector<uint8_t> androidAutoPair() {
     return buildSetUuidPayload(uuid, uuid);
 }
 // No re-registration if a link arrived meanwhile, the slot is busy, or ownership is unclear.
-// The exact current AA pair is registered again; the BMW baseline is never used for a refresh.
-inline bool refreshAdvertisement(AlpsSppLink& bt, SppSnapshotReader& reader) {
+// The exact current AA pair is registered again; the BMW baseline is never used for a refresh. slot: the one bt was
+// started on.
+inline bool refreshAdvertisement(AlpsSppLink& bt, SppSnapshotReader& reader, unsigned slot) {
     if (bt.linkUp()) {
         return true;
     }
     SppSlotSnapshot current;
-    if (!reader.read(0, current)) {
+    if (!reader.read(slot, current)) {
         ELOG("Advertisement", "refresh skipped: Alps state unreadable or changing");
         return true;
     }
@@ -64,7 +65,7 @@ inline bool refreshAdvertisement(AlpsSppLink& bt, SppSnapshotReader& reader) {
         ELOG("Advertisement", "UUID refresh not confirmed (%d): stopping so that Bluetooth is restored", result);
         return false;
     }
-    ELOG("Advertisement", "Android Auto advertised again on the idle SPP 0; waiting for the phone");
+    ELOG("Advertisement", "Android Auto advertised again on the idle SPP %u; waiting for the phone", slot);
     return true;
 }
 }  // namespace evo

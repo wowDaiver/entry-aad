@@ -42,6 +42,13 @@ void messages() {
     Bytes endless({0x00, 0x0b, 0x08});
     endless.insert(endless.end(), 20, 0xff);
     CHECK(pingResponse(endless).size() == 16);
+    // Our own ping: the timestamp alone, as field 1; the phone's answer to it echoes it back.
+    CHECK(pingRequest(150) == Bytes({0x00, 0x0b, 0x08, 0x96, 0x01}));
+    CHECK(pingRequest(0) == Bytes({0x00, 0x0b, 0x08, 0x00}));
+    Bytes ours = pingRequest(1700000000123456ull);  // a clock in microseconds: an 8-byte varint
+    CHECK(ours.size() == 11);
+    ours[1] = 0x0c;
+    CHECK(pingResponse(pingRequest(1700000000123456ull)) == ours);
 
     CHECK(setupResponse() == Bytes({0x80, 0x03, 0x08, 0x02, 0x10, 0x0a, 0x18, 0x00}));
     CHECK(videoFocusIndication(true, false) == Bytes({0x80, 0x08, 0x08, 0x01, 0x10, 0x00}));

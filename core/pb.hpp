@@ -67,32 +67,6 @@ inline bool readVarint(const uint8_t* data, size_t size, size_t& pos, uint64_t& 
     return false;
 }
 
-// Moves past the value of a field whose key was just read; false when it is malformed or cut short.
-inline bool skipValue(const uint8_t* data, size_t size, size_t& pos, unsigned type) {
-    uint64_t value = 0;
-    switch (type) {
-        case kVarint:
-            return readVarint(data, size, pos, value);
-        case kFixed64:
-        case kFixed32: {
-            const size_t width = type == kFixed64 ? 8 : 4;
-            if (width > size - pos) {
-                return false;
-            }
-            pos += width;
-            return true;
-        }
-        case kBytes:
-            if (!readVarint(data, size, pos, value) || value > size - pos) {
-                return false;
-            }
-            pos += static_cast<size_t>(value);
-            return true;
-        default:
-            return false;
-    }
-}
-
 // One field of a message, as FieldReader gives it.
 struct Field {
     uint32_t number;

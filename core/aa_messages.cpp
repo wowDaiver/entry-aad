@@ -114,6 +114,12 @@ Message pingResponse(const Message& request) {
     return m;
 }
 
+Message pingRequest(uint64_t timestampUs) {
+    Message m = withId(msg::kPingRequest);
+    pb::appendUint(m, kTimestampField, timestampUs);
+    return m;
+}
+
 Message audioFocusResponse(uint32_t state) {
     return statusOnly(msg::kAudioFocusResponse, state);
 }

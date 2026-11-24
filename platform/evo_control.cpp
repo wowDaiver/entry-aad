@@ -3,11 +3,10 @@
 // Control channel between the iDrive app and the Android Auto service (see evo_control.hpp).
 #include "evo_control.hpp"
 
-#include <arpa/inet.h>
 #include <fcntl.h>
-#include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -15,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "control_address.hpp"
 #include "evo_log.hpp"
 
 namespace evo {
@@ -36,7 +36,7 @@ bool parseControlCommand(const char* data, size_t len, ControlCommand& out) {
     if (n < 1 || n > 2) {
         return false;
     }
-    static const char* const known[] = {"ping", "show",     "hide",      "quit", "gear",
+    static const char* const known[] = {"ping", "show",     "hide",      "quit", "gear", "await",
                                         "pdc",  "daynight", "drivemode", "call", "popup"};
     bool ok = false;
     for (unsigned i = 0; i < sizeof(known) / sizeof(known[0]); ++i) {
@@ -63,21 +63,21 @@ EvoControl::~EvoControl() {
     stop();
 }
 
-bool EvoControl::start(uint16_t port, const char* stateFile, Callback cb, void* user) {
+bool EvoControl::start(const char* name, const char* stateFile, Callback cb, void* user) {
     if (started_) {
         return true;
     }
-    fd_ = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    fd_ = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd_ < 0) {
+        ELOG("Control", "no control channel: socket: %s", strerror(errno));
         return false;
     }
-    sockaddr_in a;
-    memset(&a, 0, sizeof(a));
-    a.sin_family = AF_INET;
-    a.sin_port = htons(port);
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(fd_, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) {
-        ELOG("Control", "UDP 127.0.0.1:%u already taken (%s): a service already runs", port, strerror(errno));
+    sockaddr_un a;
+    const socklen_t length = controlAddress(name, a);
+    if (bind(fd_, reinterpret_cast<sockaddr*>(&a), length) != 0) {
+        // Only a program that asks for this very name can hold it: "in use" is a service of ours, still running.
+        ELOG("Control", "control channel \"%s\" not available (%s)%s", name, strerror(errno),
+             errno == EADDRINUSE ? ": a service already runs" : "");
         close(fd_);
         fd_ = -1;
         return false;
@@ -93,7 +93,7 @@ bool EvoControl::start(uint16_t port, const char* stateFile, Callback cb, void* 
         return false;
     }
     started_ = true;
-    ELOG("Control", "iDrive app commands on UDP 127.0.0.1:%u; state in %s", port, stateFile_.c_str());
+    ELOG("Control", "iDrive app commands on the control channel \"%s\"; state in %s", name, stateFile_.c_str());
     return true;
 }
 
@@ -153,14 +153,11 @@ void EvoControl::run() {
         if (poll(&p, 1, 200) <= 0) {
             continue;
         }
-        sockaddr_in from;
+        sockaddr_un from;
         socklen_t fl = sizeof(from);
         ssize_t n = recvfrom(fd_, buf, sizeof(buf), MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&from), &fl);
         if (n <= 0) {
             continue;
-        }
-        if (from.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
-            continue;  // loopback only
         }
         ControlCommand c;
         if (!parseControlCommand(buf, static_cast<size_t>(n), c)) {
@@ -168,7 +165,10 @@ void EvoControl::run() {
             continue;
         }
         if (c.verb == "ping") {
-            sendto(fd_, "pong", 4, 0, reinterpret_cast<sockaddr*>(&from), fl);
+            // A sender with no address of its own cannot be answered; never wait on a sender that does not read.
+            if (fl > sizeof(sa_family_t) && fl <= sizeof(from)) {
+                sendto(fd_, "pong", 4, MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&from), fl);
+            }
             continue;
         }
         if (c.hasArg) {

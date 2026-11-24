@@ -3,6 +3,8 @@
 // Android Auto video: libxsvideo decoder, dma-buf feeding and surface visibility (see evo_video.hpp).
 #include "evo_video.hpp"
 
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -25,7 +27,8 @@ EvoVideoConfig::EvoVideoConfig()
       surfaceId(kAaSurfaceId),
       layerId(kAaLayerId),
       bufCount(8),
-      bufSize(1u << 20) {}
+      bufSize(1u << 20),
+      holdCloseFrames(false) {}
 
 EvoVideo::EvoVideo()
     : h_(nullptr),
@@ -54,6 +57,17 @@ EvoVideo::~EvoVideo() {
     stop();
     pthread_cond_destroy(&cv_);
     pthread_mutex_destroy(&mu_);
+}
+
+void EvoVideoConfig::setDisplay(uint32_t canvasWidth, uint32_t canvasHeight, uint32_t panelWidth,
+                                uint32_t panelHeight) {
+    width = canvasWidth;
+    height = canvasHeight;
+    displayWidth = panelWidth;
+    displayHeight = panelHeight;
+    if (canvasWidth > 1280 || canvasHeight > 720) {
+        bufSize = 2u << 20;
+    }
 }
 
 bool EvoVideo::init(const EvoVideoConfig& cfg) {
@@ -109,6 +123,10 @@ bool EvoVideo::start() {
     started_ = true;
     configSent_ = false;
     framesAtStart_ = framesIn_;
+    stall_.restart();  // a new decoder; no frame is posted before start() returns
+    pthread_mutex_lock(&mu_);
+    gap_.restart(cfg_.holdCloseFrames);  // its counts are taken by the main loop
+    pthread_mutex_unlock(&mu_);
     if (pthread_create(&evThread_, nullptr, eventStub, this) == 0) {
         evStarted_ = true;
     } else {
@@ -221,13 +239,24 @@ bool EvoVideo::isIdr(const uint8_t* d, size_t n) const {
     return false;
 }
 
-bool EvoVideo::postVideoFrame(const uint8_t* data, size_t len, uint64_t pts) {
+FrameFate EvoVideo::postVideoFrame(const uint8_t* data, size_t len, uint64_t pts) {
     (void)pts;
     if (!running_ || !started_) {
-        return false;
+        return FrameFate::kNoStream;
     }
 
     pthread_mutex_lock(&mu_);
+    // A frame right behind the previous one waits for the rest of kFrameGapMs, without the lock (FrameGap).
+    const uint32_t holdMs = gap_.arrive(monoMs());
+    if (holdMs) {
+        pthread_mutex_unlock(&mu_);
+        usleep(holdMs * 1000);
+        pthread_mutex_lock(&mu_);
+        if (!running_) {
+            pthread_mutex_unlock(&mu_);
+            return FrameFate::kNoStream;
+        }
+    }
     bool idr = isIdr(data, len);
     if (idr) {
         ++idrSeen_;
@@ -237,11 +266,13 @@ bool EvoVideo::postVideoFrame(const uint8_t* data, size_t len, uint64_t pts) {
     size_t need = len + (prependCfg ? codecCfg_.size() : 0);
 
     int bi = pool_.acquireFree();
-    // Bounded wait for a free buffer (the event thread releases one on each DMABUF_COMPLETE).
+    // Bounded wait for a free buffer (the event thread releases one on each DMABUF_COMPLETE); none once the decoder
+    // has stalled, so that the session thread no longer loses 20 ms on every frame.
+    const bool wait = bi < 0 && !stall_.stuck(monoMs());
     struct timespec ts;
     ts.tv_sec = 0;
     ts.tv_nsec = 0;
-    while (bi < 0 && running_) {
+    while (bi < 0 && wait && running_) {
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);  // the clock cv_ was created with
         ts = now;
@@ -257,16 +288,23 @@ bool EvoVideo::postVideoFrame(const uint8_t* data, size_t len, uint64_t pts) {
     }
     if (bi < 0) {
         ++framesDropped_;
+        const bool stalled = stall_.starved(monoMs(), visible_);
         pthread_mutex_unlock(&mu_);
-        return false;
+        if (stalled) {
+            ELOG("Video", "no buffer back from the decoder for %u ms, all %u out: decoder stalled",
+                 DecoderStall::kLimitMs, cfg_.bufCount);
+            return FrameFate::kStalled;
+        }
+        return FrameFate::kLost;
     }
+    stall_.bufferBack();
 
     DmaBufPool::Buf& b = pool_.at(bi);
     if (need > b.size) {
         ++framesDropped_;
         pthread_mutex_unlock(&mu_);
         ELOG("Video", "frame %zu B > buffer %u B", need, b.size);
-        return false;
+        return FrameFate::kLost;
     }
     size_t off = 0;
     if (prependCfg) {
@@ -289,9 +327,16 @@ bool EvoVideo::postVideoFrame(const uint8_t* data, size_t len, uint64_t pts) {
         }
         pthread_cond_signal(&cv_);
         pthread_mutex_unlock(&mu_);
-        return false;
+        return FrameFate::kLost;
     }
-    return true;
+    return FrameFate::kDecoding;
+}
+
+FrameGapStats EvoVideo::takeFrameGaps() {
+    pthread_mutex_lock(&mu_);
+    const FrameGapStats taken = gap_.take();
+    pthread_mutex_unlock(&mu_);
+    return taken;
 }
 
 void* EvoVideo::eventStub(void* self) {
@@ -330,6 +375,7 @@ void EvoVideo::eventLoop() {
                 int bi = pool_.find(evt[1]);
                 if (bi >= 0) {
                     pool_.at(bi).inFlight = false;
+                    stall_.bufferBack();
                     pthread_cond_signal(&cv_);
                 }
                 pthread_mutex_unlock(&mu_);

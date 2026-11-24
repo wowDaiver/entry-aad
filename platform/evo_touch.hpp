@@ -50,6 +50,16 @@ public:
     void reset();
     // False until the Android Auto picture has started (true by default).
     void setPictureStarted(bool started) { pictureStarted_ = started; }
+    // The last pixel of the phone's display: no coordinate is sent past it.
+    void setLimits(int maxX, int maxY) {
+        maxX_ = maxX;
+        maxY_ = maxY;
+    }
+    // Added to every panel coordinate before the limits.
+    void setOffset(double ox, double oy) {
+        ox_ = ox;
+        oy_ = oy;
+    }
 
 private:
     void fillActive(aa::TouchEventOut& e, int which) const;
@@ -68,11 +78,33 @@ private:
     int lastN_;
 };
 
+// Which decoded events reach the phone (forward mode), no I/O. Everything while the picture is ours. Once it has gone,
+// only the lift of a finger the phone saw go down: a lift decoded between the picture stepping aside (volume, popup,
+// reverse, MENU) and the touch thread's next turn was dropped, the tracker forgot the finger, and the phone kept it
+// down until the next touch.
+class PhoneFingers {
+public:
+    PhoneFingers() : down_(0) {}
+    // Whether ev goes to the phone, owned: the picture is on screen. Keeps track of the fingers down on the phone.
+    bool admit(const aa::TouchEventOut& ev, bool owned);
+    bool any() const { return down_ != 0; }
+    void clear() { down_ = 0; }
+
+private:
+    unsigned down_;  // bit k: finger k went down on the phone and has not been lifted there yet
+};
+
 class EvoTouch {
 public:
     using Callback = void (*)(const aa::TouchEventOut&, void*);
     EvoTouch();
     ~EvoTouch();
+    // Before start(): the phone's display (core/display_plan.hpp), which begins originX panel columns from the left
+    // (its left margin) and is width x height; 1280x720 at 0 by default. Touches are sent in its pixels.
+    void setPhoneDisplay(uint32_t originX, uint32_t width, uint32_t height) {
+        tracker_.setOffset(-static_cast<double>(originX), 0.0);
+        tracker_.setLimits(static_cast<int>(width) - 1, static_cast<int>(height) - 1);
+    }
     bool start(InputMode mode, Callback cb, void* user);
     // Forward mode only: true while the Android Auto picture is on screen and the session is up.
     void setOwned(bool owned);
@@ -100,7 +132,7 @@ private:
     uint32_t lastFrameMs_;
     TouchTracker tracker_;
     unsigned tapped_, touchPdus_, otherPdus_, events_, sent_, stolen_, rawLogged_, eventsLogged_;
-    bool fingerSent_;  // a finger went down on the phone and has not been lifted there yet (touch thread)
+    PhoneFingers phone_;  // touch thread only
 };
 
 }  // namespace evo

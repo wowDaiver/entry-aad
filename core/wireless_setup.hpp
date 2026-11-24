@@ -40,6 +40,11 @@ public:
     // After the handshake: answers pings and new info requests, waiting up to waitMs for data. False once the phone
     // closed the link.
     bool serve(int waitMs);
+    // A link that came back while Android Auto already runs: listens only, up to waitMs. A ping is answered;
+    // anything else is written to the log and left unanswered, and nothing is sent first (a new WifiStartRequest
+    // could restart the session that runs). False once the phone closed the link.
+    bool listen(int waitMs);
+    unsigned heard() const { return heard_; }  // messages received by listen()
     // The phone sent at least one well-formed message on this link (a working phone: WifiStartResponse at once).
     bool spokeWireless() const { return spoke_; }
 
@@ -64,6 +69,7 @@ private:
     std::vector<uint8_t> pending_;  // read, not yet cut into messages
     bool foreign_;                  // the link turned out to be the BMW app's
     bool spoke_;
+    unsigned heard_;
 };
 
 // True when the bytes are the BMW app's (MyBMW, BMW Connected), not Android Auto's: its 4-byte startup magic

@@ -22,12 +22,19 @@ public:
     bool start(DataCallback cb, void* user);
     // Phone opened/closed the mic. Never blocks (called on the AA session thread).
     void request(bool open);
+    // Returns within about a wait slice (100 ms), whatever the microphone does.
     void stop();
 
 private:
     static void* threadStub(void* arg);
     void loop();
     bool load();
+    void listen();
+    void* openCapture();
+    bool captureUntilClosed(void* pcm, unsigned long& frames, unsigned& errors);
+    bool wanted();
+    bool pauseWhileWanted(unsigned ms);
+    void restUntilAskedAgain();
     DataCallback cb_;
     void* user_;
     void* lib_;
@@ -35,10 +42,12 @@ private:
     pthread_mutex_t mu_;
     pthread_cond_t cv_;
     bool started_, quit_, want_;
+    unsigned asks_;  // open requests from the phone, counted
     // libasound entry points (resolved with dlsym)
     int (*open_)(void**, const char*, int, int);
     int (*setParams_)(void*, int, int, unsigned, unsigned, int, unsigned);
     long (*readi_)(void*, void*, unsigned long);
+    int (*wait_)(void*, int);
     int (*recover_)(void*, int, int);
     int (*close_)(void*);
     const char* (*strerror_)(int);

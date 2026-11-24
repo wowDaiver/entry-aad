@@ -10,7 +10,8 @@
 //         1 up, 4 right, 7 down, 10 left; seen 1, 7, 4, 10 for up, down, right, left), [5..6] 0, [7] 0xff.
 //   0xC47 PushButtonsState (7 bytes) and 0xC4F PushButtonsState2 (8 bytes, [7] = 7): the same state, one byte per hard
 //         key, 0 released or 1 pressed (a 1.5 s MEDIA hold stayed 1): the change between messages makes one event.
-//         Slots in BMW key order: 0 MENU, 1 BACK, 2 OPTIONS, 3 COM, 4 MEDIA, 5 NAV, 6 MAP (BACK sets slot 1, never 2).
+//         Bytes in BMW key order on a G controller: 0 MENU, 1 BACK, 2 OPTIONS, 3 COM, 4 MEDIA, 5 NAV, 6 MAP (BACK
+//         sets byte 1, never 2); which key each byte is depends on the car's coding (controller_layout.hpp).
 // The older CCS protocol, on the same FBlock (instance 0x01 for the front controller), as HmiMain3D reads it, which
 // decodes both and follows whichever the controller speaks; C10 and C20 were seen in a G30 capture:
 //   0xC10 RotaryEncoder, 7 bytes: [0] sender 0x01, [1] receiver 0x1D, [2] counter, +1 per message (0xFF: controller
@@ -19,8 +20,9 @@
 //         more byte before the cluster.
 //   0xC20 PushButton, 7 bytes, one event each: [0] sender, [1] receiver, [2] counter (0xFF: ignored), [3] status
 //         0 released, 1 pressed, 2 held, 3 no change, [4] tilt 1 up, 2 right, 4 down, 8 left (0 on release),
-//         [5] cluster: 0x00 hard keys, 0x1D tilt, 0x1E knob (sensor 1: centre push), [6] sensor: for a hard key, bit n
-//         is slot n above (the same key table), so one slot mapping serves both protocols.
+//         [5] cluster: 0x00 hard keys, 0x1D tilt, 0x1E knob (sensor 1: centre push), [6] sensor: one bit per hard
+//         key, which key depending on the car's coding (controller_layout.hpp): on a G controller bit n is byte n
+//         above; a 5-key F20 ZBE3 sends MEDIA as 0x08 and COM as 0x40 (#55).
 // No I/O; tested in tests/test_evo_input.cpp.
 
 #include <stddef.h>
@@ -28,6 +30,7 @@
 #include <string.h>
 
 #include "aa_input.hpp"
+#include "controller_layout.hpp"
 
 namespace aa {
 
@@ -52,6 +55,25 @@ public:
             slotKeys_[i] = kDefaultKeys[i];
             slots_[i] = ccsSlots_[i] = false;
         }
+        setCoding(defaultControllerCoding());
+    }
+
+    // Which slot each button is, from the car's coding (controller_layout.hpp). Before any call: the G-style table.
+    void setCoding(const ControllerCoding& coding) {
+        for (int i = 0; i < kSlots; ++i) {
+            byteSlot_[i] = ccs35upByteSlot(i, coding);
+            bitSlot_[i] = olderSensorSlot(1u << i, coding);
+        }
+    }
+    // The slot of a CCS35up push button byte, or of an older protocol sensor bit; kNoSlot for none.
+    int byteSlot(int byte) const { return byte >= 0 && byte < kSlots ? byteSlot_[byte] : kNoSlot; }
+    int sensorSlot(unsigned sensor) const {
+        for (int bit = 0; bit < kSlots; ++bit) {
+            if (sensor == (1u << bit)) {
+                return bitSlot_[bit];
+            }
+        }
+        return kNoSlot;
     }
 
     // The Android key of a hard key slot; 0 leaves the key to iDrive (its events still come, with keycode 0).
@@ -101,8 +123,8 @@ public:
                 push_ = push;
             }
         } else if ((fkt == 0xC47 || fkt == 0xC4F) && n >= 1) {
-            for (int slot = 0; slot < kSlots && static_cast<size_t>(slot) < n; ++slot) {
-                setSlot(slot, d[slot] != 0, slots_, events);
+            for (int byte = 0; byte < kSlots && static_cast<size_t>(byte) < n; ++byte) {
+                setButton(byte, byteSlot_[byte], d[byte] != 0, slots_, events);
             }
         }
         return events.count;
@@ -188,11 +210,13 @@ private:
         held = key;
     }
 
-    void setSlot(int slot, bool down, bool* state, Events& events) {
-        if (down != state[slot]) {
-            state[slot] = down;
-            events.add(1, slotKeys_[slot], down ? 1 : 0, 0, slotName(slot));
+    // One button (its byte or bit index, which holds its state) that is the key of slot; none: ignored.
+    void setButton(int button, int slot, bool down, bool* state, Events& events) {
+        if (slot == kNoSlot || down == state[button]) {
+            return;
         }
+        state[button] = down;
+        events.add(1, slotKeys_[slot], down ? 1 : 0, 0, slotName(slot));
     }
 
     int ccsRotary(const uint8_t* d, size_t n, Events& events) {
@@ -230,9 +254,9 @@ private:
         } else if (cluster == 0x1D) {
             setTilt(down && d[4] ? bitTilt(d[4]) : 0, ccsTilt_, events);
         } else if (cluster == 0x00) {
-            for (int slot = 0; slot < kSlots; ++slot) {
-                if (sensor == (1u << slot)) {
-                    setSlot(slot, down, ccsSlots_, events);
+            for (int bit = 0; bit < kSlots; ++bit) {
+                if (sensor == (1u << bit)) {
+                    setButton(bit, bitSlot_[bit], down, ccsSlots_, events);
                 }
             }
         }
@@ -242,12 +266,72 @@ private:
     int position_;
     uint32_t tilt_;
     bool push_;
-    bool slots_[kSlots];     // CCS35up hard keys
-    bool ccsSlots_[kSlots];  // older protocol hard keys: a press on one must not hide the other
+    bool slots_[kSlots];     // CCS35up hard keys, per byte
+    bool ccsSlots_[kSlots];  // older protocol hard keys, per sensor bit: a press on one must not hide the other
     uint32_t slotKeys_[kSlots];
+    int byteSlot_[kSlots];  // CCS35up byte -> slot, from the car's coding
+    int bitSlot_[kSlots];   // older protocol sensor bit -> slot
     int ccsPosition_;
     uint32_t ccsTilt_;
     bool ccsPush_;
+};
+
+// Which of the two protocols the car's controller speaks. vmostd hands a client a function's status only once the
+// client has read that function (evo_knob.hpp), so each protocol must be asked for. CCS35up is read first; the older
+// functions are read only on a car whose controller stays silent on CCS35up for kSilenceMs (the G20 answers within
+// 20 ms and is asked nothing more). The first protocol heard is kept and the other one's status messages are left
+// out, so a car that would speak both never counts one action twice.
+class CcsProtocol {
+public:
+    enum Kind { kUnknown, kCcs35up, kOlder };
+    enum { kSilenceMs = 2000 };
+
+    CcsProtocol() : kind_(kUnknown), asked_(false), olderAsked_(false), askedMs_(0) {}
+
+    Kind kind() const { return kind_; }
+    static const char* name(Kind kind) {
+        return kind == kCcs35up ? "CCS35up (E5.03)" : kind == kOlder ? "older CCS (E5.01, C10/C20)" : "unknown";
+    }
+    // The protocol a status message of FBlock 0xE5 belongs to; kUnknown for any other function.
+    static Kind of(uint8_t inst, uint16_t fkt) {
+        if (inst == CcsDecoder::kInstance && (fkt == 0xC46 || fkt == 0xC47 || fkt == 0xC4F)) {
+            return kCcs35up;
+        }
+        if (inst == CcsDecoder::kCcsInstance && (fkt == 0xC10 || fkt == 0xC20)) {
+            return kOlder;
+        }
+        return kUnknown;
+    }
+
+    // The CCS35up functions have just been read (monotonic milliseconds, compared with wrap-around).
+    void ccs35upAsked(uint32_t nowMs) {
+        asked_ = true;
+        askedMs_ = nowMs;
+    }
+    // True once: CCS35up has stayed silent since its reads, the older functions are to be read now.
+    bool olderDue(uint32_t nowMs) {
+        if (!asked_ || olderAsked_ || kind_ != kUnknown || nowMs - askedMs_ < static_cast<uint32_t>(kSilenceMs)) {
+            return false;
+        }
+        olderAsked_ = true;
+        return true;
+    }
+    // A status message (op 0xC) of FBlock 0xE5: false when it belongs to the protocol that was not kept.
+    bool accept(uint8_t inst, uint16_t fkt) {
+        const Kind kind = of(inst, fkt);
+        if (kind == kUnknown) {
+            return true;
+        }
+        if (kind_ == kUnknown) {
+            kind_ = kind;
+        }
+        return kind == kind_;
+    }
+
+private:
+    Kind kind_;
+    bool asked_, olderAsked_;
+    uint32_t askedMs_;
 };
 
 }  // namespace aa

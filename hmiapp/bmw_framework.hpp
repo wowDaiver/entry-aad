@@ -65,6 +65,7 @@ public:
     void addHandler(unsigned actionId, const ActionDelegate& handler);
     void addHandler(unsigned id, unsigned type, const ActionDelegate& handler);
     void triggerEvent(unsigned eventId);
+    void triggerEvent(unsigned eventId, const Parcel& value);  // _ZN3bmw9PluginApp12triggerEventEjRKNS_6ParcelE
     void post(Runnable* runnable, unsigned delayMs);
     void updateModel(unsigned modelId, const TextID& text);
     void updateModel(unsigned modelId, const ImageID& image);

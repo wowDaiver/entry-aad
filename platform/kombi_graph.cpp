@@ -44,6 +44,11 @@ const uint16_t kManeuverMethod = 0x000A;  // maneuver models
 const uint16_t kGuidingMethod = 0x000B;   // guiding model
 const uint16_t kLaneMethod = 0x0010;      // lane models (setLaneGuidingData)
 
+// Through the first maneuver list, init and guidance-state 2. G01 146 accepts this complete
+// block, but rejects the next road (0x27000001) in the captured multi-road route. AA exposes
+// only maneuver 0 here: do not create the template's unrelated roads/texts or reference them.
+const size_t kSingleManeuverCount = 14;
+
 const uint32_t kOurLaneModel = 0x1B000000;  // lane model 0
 const double kFallbackSpan = 120.0;         // when the template's car position isn't before maneuver 0
 const double kSectionLead = 100.0;          // the section also starts this far before the car position reported
@@ -233,9 +238,11 @@ bool setLaneModels(Bytes& b, const std::vector<uint32_t>& ids) {
 
 }  // namespace
 
-RouteGraph::RouteGraph(uint32_t handle, int bar) : handle_(handle), bar_(bar), carRequest_(-1), carAt_(0) {
+RouteGraph::RouteGraph(uint32_t handle, int bar, bool singleManeuver)
+    : handle_(handle), bar_(bar), singleManeuver_(singleManeuver), carRequest_(-1), carAt_(0) {
     // The car's position in the template: its last destination info with a route position (4132 m).
-    for (size_t i = 0; i < tmpl::phase_b_count; ++i) {
+    const size_t count = singleManeuver_ ? kSingleManeuverCount : tmpl::phase_b_count;
+    for (size_t i = 0; i < count; ++i) {
         const tmpl::Frame& t = tmpl::phase_b[i];
         if (t.method != kRouteMethod || t.len < kCarAt + 8 || t.body[kModelTypeAt] != kDestinationModel) {
             continue;
@@ -299,8 +306,9 @@ bool RouteGraph::patch(Request& r, const ClusterManeuver& m) const {
 
 bool RouteGraph::routeStart(const ClusterManeuver& m, std::vector<Request>& out, LaneSection* section) const {
     out.clear();
-    out.reserve(tmpl::phase_b_count);
-    for (size_t i = 0; i < tmpl::phase_b_count; ++i) {
+    const size_t count = singleManeuver_ ? kSingleManeuverCount : tmpl::phase_b_count;
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
         out.push_back(copied(i));
         if (!patch(out.back(), m)) {
             out.clear();
@@ -395,7 +403,8 @@ bool RouteGraph::maneuverUpdate(const ClusterManeuver& m, bool withGuiding, std:
 
 bool RouteGraph::distanceUpdate(const std::string& text, int unit, std::vector<Request>& out) const {
     out.clear();
-    for (size_t i = tmpl::phase_b_count; i-- > 0;) {
+    const size_t count = singleManeuver_ ? kSingleManeuverCount : tmpl::phase_b_count;
+    for (size_t i = count; i-- > 0;) {
         if (tmpl::phase_b[i].method != kManeuverMethod) {
             continue;
         }

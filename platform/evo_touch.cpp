@@ -242,6 +242,28 @@ int TouchTracker::feed(const uint8_t* buf, size_t n, aa::TouchEventOut* evs, int
     return ne;
 }
 
+// aa::TouchEventOut actions (aa_input.hpp).
+static const int kPress = 0, kRelease = 1, kPointerDown = 5, kPointerUp = 6;
+
+bool PhoneFingers::admit(const aa::TouchEventOut& ev, bool owned) {
+    const bool down = ev.action == kPress || ev.action == kPointerDown;
+    const bool up = ev.action == kRelease || ev.action == kPointerUp;
+    const int id = ev.index >= 0 && ev.index < ev.n ? ev.p[ev.index].id : -1;
+    if ((!down && !up) || id < 0 || id >= aa::kTouchMaxContacts) {
+        return owned;  // a drag, or no finger to follow
+    }
+    const unsigned bit = 1u << id;
+    if (!owned && !(up && (down_ & bit))) {
+        return false;
+    }
+    if (down) {
+        down_ |= bit;
+    } else {
+        down_ &= ~bit;
+    }
+    return true;
+}
+
 EvoTouch::EvoTouch()
     : mode_(INPUT_OFF),
       cb_(nullptr),
@@ -266,8 +288,7 @@ EvoTouch::EvoTouch()
       sent_(0),
       stolen_(0),
       rawLogged_(0),
-      eventsLogged_(0),
-      fingerSent_(false) {}
+      eventsLogged_(0) {}
 
 EvoTouch::~EvoTouch() {
     stop();
@@ -419,9 +440,11 @@ void EvoTouch::updateSteal(bool want) {
 }
 
 void EvoTouch::emit(const aa::TouchEventOut* ev, int n) {
-    const bool send = mode_ == INPUT_FORWARD && owned_ && cb_;
+    const bool forward = mode_ == INPUT_FORWARD && cb_;
+    const bool owned = owned_;
     for (int i = 0; i < n; ++i) {
         ++events_;
+        const bool send = forward && phone_.admit(ev[i], owned);
         if (eventsLogged_ < 300 && (ev[i].action != 2 || eventsLogged_ < 60)) {
             ++eventsLogged_;
             char line[160];
@@ -437,9 +460,6 @@ void EvoTouch::emit(const aa::TouchEventOut* ev, int n) {
             cb_(ev[i], user_);
             ++sent_;
         }
-    }
-    if (send) {
-        fingerSent_ = tracker_.activeCount() > 0;
     }
 }
 
@@ -504,17 +524,18 @@ void EvoTouch::run() {
             // The picture left with a finger down: the phone gets the lift its press was promised, iDrive nothing.
             aa::TouchEventOut ev[aa::kTouchMaxContacts];
             int n = tracker_.releaseAll(ev, aa::kTouchMaxContacts);
+            const bool fingerSent = phone_.any();
             for (int i = 0; i < n; ++i) {
                 ++events_;
-                if (fingerSent_ && cb_) {
+                if (fingerSent && cb_) {
                     cb_(ev[i], user_);
                     ++sent_;
                 }
             }
-            if (n && fingerSent_) {
+            if (n && fingerSent) {
                 ELOG("Touch", "picture gone with a finger down: %d release(s) sent to AA", n);
             }
-            fingerSent_ = false;
+            phone_.clear();
         }
         struct pollfd p[2];
         int np = 0;

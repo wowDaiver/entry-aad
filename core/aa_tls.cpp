@@ -3,6 +3,7 @@
 // TLS 1.2 client of the session, on OpenSSL memory BIOs; every OpenSSL object is owned and freed in one place.
 #include "aa_tls.hpp"
 
+#include <openssl/err.h>
 #include <openssl/pem.h>
 
 #include <cstdio>
@@ -36,13 +37,15 @@ TlsClient::TlsClient()
       connection_(nullptr, SSL_free),
       fromPhone_(nullptr),
       toPhone_(nullptr),
-      established_(false) {}
+      established_(false),
+      broken_(false) {}
 
 bool TlsClient::start() {
     connection_.reset();  // the memory BIOs go with it
     context_.reset();
     fromPhone_ = toPhone_ = nullptr;
     established_ = false;
+    broken_ = false;
 
     SSL_library_init();
     SSL_load_error_strings();
@@ -121,25 +124,47 @@ bool TlsClient::handshake(const uint8_t* records, size_t size, std::vector<uint8
 }
 
 bool TlsClient::seal(const uint8_t* plain, size_t size, std::vector<uint8_t>& records) {
-    if (!connection_ || !established_) {
+    records.clear();
+    if (!connection_ || !established_ || broken_) {
         return false;
     }
-    SSL_write(connection_.get(), plain, static_cast<int>(size));
+    ERR_clear_error();
+    if (SSL_write(connection_.get(), plain, static_cast<int>(size)) != static_cast<int>(size)) {
+        // What OpenSSL left for the phone is not this message (after a failed read: its alert). Handed out as sealed,
+        // it went to the phone as if it were the message.
+        endForGood("write");
+        takeOutput(records);
+        records.clear();
+        return false;
+    }
     return takeOutput(records);
 }
 
 bool TlsClient::open(const uint8_t* records, size_t size, std::vector<uint8_t>& plain) {
     plain.clear();
-    if (!connection_ || !established_ || size == 0) {
+    if (!connection_ || !established_ || broken_ || size == 0) {
         return false;
     }
     BIO_write(fromPhone_, records, static_cast<int>(size));
     uint8_t chunk[4096];
     int n;
+    ERR_clear_error();
     while ((n = SSL_read(connection_.get(), chunk, sizeof(chunk))) > 0) {
         plain.insert(plain.end(), chunk, chunk + n);
     }
+    // Waiting for more: the rest of a record still to come in a later frame. Anything else is final: a record that
+    // fails its check is a fatal error in TLS, OpenSSL then refuses every later record, the good ones too.
+    if (SSL_get_error(connection_.get(), n) != SSL_ERROR_WANT_READ) {
+        endForGood("read");
+    }
     return !plain.empty();
+}
+
+void TlsClient::endForGood(const char* step) {
+    broken_ = true;
+    const char* reason = ERR_reason_error_string(ERR_peek_last_error());
+    printf("[AACryptor] TLS %s failed for good (%s): nothing more can be decrypted or sealed\n", step,
+           reason ? reason : "no OpenSSL reason");
 }
 
 bool TlsClient::takeOutput(std::vector<uint8_t>& records) {

@@ -34,35 +34,42 @@ uint32_t decodeTotalSize(const uint8_t* bytes);
 bool encodeFrame(uint8_t channel, uint8_t flags, const uint8_t* payload, size_t length, std::vector<uint8_t>& out);
 
 // Joins the fragments of each channel's messages. A whole frame passes straight through and leaves a message being
-// assembled on its channel as it is.
+// assembled on its channel as it is. A message that cannot be rebuilt is dropped once: when that is known before its
+// LAST, the rest of its fragments are skipped quietly up to that LAST, rather than each dropped on its own or taken for
+// the start of a message.
 class MessageAssembler {
 public:
     enum Outcome {
         kPending,      // a FIRST or MIDDLE fragment, kept
         kComplete,     // `message` holds a whole message
-        kOverflow,     // the channel's message would pass frame::kMaxMessage: its fragments are dropped
-        kNoFirst,      // a LAST fragment with nothing before it: dropped
+        kOverflow,     // the channel's message would pass frame::kMaxMessage: dropped
+        kNoFirst,      // a MIDDLE or LAST fragment without a FIRST on its channel: its message is dropped
         kShortOfSize,  // a LAST fragment closed a message smaller than announced: dropped
+        kRestOfLost,   // a MIDDLE or LAST fragment of a message dropped before: nothing more to say about it
     };
 
     MessageAssembler() : received_(0), announced_(0) {}
 
     // `payload` is the frame's decrypted payload; `header.length` counts what came on the wire.
     Outcome add(const FrameHeader& header, const std::vector<uint8_t>& payload, std::vector<uint8_t>& message);
-    // Forgets the channel's message in progress (a fragment that could not be decrypted).
-    void drop(uint8_t channel) { pending_.erase(channel); }
+    // A frame whose payload could not be decrypted: the message it belongs to is lost, as by add(). A whole frame
+    // belongs to no message being assembled and changes nothing here.
+    void lose(const FrameHeader& header);
     void clear() { pending_.clear(); }
     // After kShortOfSize: the wire bytes received and the size the phone announced.
     uint32_t receivedBytes() const { return received_; }
     uint32_t announcedBytes() const { return announced_; }
 
 private:
+    // The message of a fragment cannot be rebuilt: after a FIRST or MIDDLE, the rest of it is skipped.
+    void forget(uint8_t channel, uint8_t position);
+
     struct Pending {
         std::vector<uint8_t> data;
-        bool sized;       // a FIRST fragment announced a size
-        uint32_t size;    // that size
+        bool lostTail;    // the message was lost: its fragments up to its LAST are ignored
+        uint32_t size;    // the size its FIRST announced
         uint32_t onWire;  // the length fields received so far
-        Pending() : sized(false), size(0), onWire(0) {}
+        Pending() : lostTail(false), size(0), onWire(0) {}
     };
     std::map<uint8_t, Pending> pending_;
     uint32_t received_;

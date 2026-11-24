@@ -9,9 +9,10 @@ body:
   - type: input
     id: version
     attributes:
-      label: entry-aad version
-      description: The release you installed, or the commit you built.
-      placeholder: 0.12.0-rc.2
+      label: Project version
+      description: The release you installed, or the commit you built. From 0.13.0-rc.10, the title of the Help page
+        in the Android Auto menu shows it.
+      placeholder: 0.13.0-rc.10
     validations:
       required: true
   - type: input
@@ -39,5 +40,6 @@ body:
     attributes:
       label: Logs
       description: |
-        With logs switched on (docs/MAINTENANCE.md): /var/local/data/AA/app.log and /tmp/entry-aa-service.log.
+        With logs switched on (Keep logs in the Android Auto menu, docs/MAINTENANCE.md): the files of
+        Copy logs to USB stick, or /var/local/data/AA/app.log and service.log over SSH.
         Drag the files here.

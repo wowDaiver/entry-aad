@@ -28,9 +28,13 @@ public:
     bool handshake(const uint8_t* records, size_t size, std::vector<uint8_t>& answer);
     bool established() const { return established_; }
 
-    // Application data, once established. False when nothing came out.
+    // Application data, once established. False when nothing came out: for open, also while a record is cut over
+    // frames and its rest is still to come; for seal, records is then empty.
     bool seal(const uint8_t* plain, size_t size, std::vector<uint8_t>& records);
     bool open(const uint8_t* records, size_t size, std::vector<uint8_t>& plain);
+    // OpenSSL failed for good (a record that failed its check, or refused by the phone's TLS): no later record can be
+    // decrypted, nothing more is sealed. Logged once. A new start() clears it.
+    bool broken() const { return broken_; }
 
 private:
     typedef std::unique_ptr<SSL_CTX, void (*)(SSL_CTX*)> Context;
@@ -38,12 +42,14 @@ private:
 
     bool configure(SSL_CTX* context);
     bool takeOutput(std::vector<uint8_t>& records);  // what OpenSSL wrote for the phone
+    void endForGood(const char* step);
 
     Context context_;
     Connection connection_;  // owns the two memory buffers below once attached
     BIO* fromPhone_;
     BIO* toPhone_;
     bool established_;
+    bool broken_;
 };
 
 }  // namespace aa

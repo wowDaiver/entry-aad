@@ -14,8 +14,9 @@ struct CommandReport {
     CommandReport() : exitCode(-1), signal(0), spawnError(0), timedOut(false), truncated(false) {}
 };
 // No shell; bounded output/time; reap the child on every exit path.
-// Uses posix_spawnp: safe to call while the AA/D-Bus worker threads are alive.
+// Uses posix_spawnp: safe to call while the AA/D-Bus worker threads are alive. environment: the child's whole
+// environment (NULL-terminated), or nullptr for ours.
 bool runCommand(const std::string& executable, const std::vector<std::string>& args, std::string& output,
-                int timeoutMs = 2000, CommandReport* diagnostic = nullptr);
+                int timeoutMs = 2000, CommandReport* diagnostic = nullptr, char* const* environment = nullptr);
 }  // namespace evo
 #endif

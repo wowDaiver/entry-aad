@@ -12,12 +12,15 @@
 #include <atomic>
 
 #include "alps_spp.hpp"
+#include "evo_ap.hpp"
 #include "evo_log.hpp"
 #include "service_app.hpp"
+#include "service_contract.hpp"
 #include "wireless_setup.hpp"
 
-static std::atomic<int> starts(0), waits(0);
+static std::atomic<int> starts(0), waits(0), listens(0), serves(0), prepared(0), sppDrops(0);
 static std::atomic<bool> fixtureLink(true), borrowed(false);
+static std::atomic<bool> phoneKeepsLink(false);  // the phone keeps its Bluetooth link after accepting the Wi-Fi
 static evo::ServiceApp* instance = 0;
 static volatile sig_atomic_t quitFlag = 0;
 namespace evo {
@@ -43,21 +46,44 @@ void AlpsSppLink::closeLink() {
     fixtureLink = false;
     borrowed = false;
 }
+// Asked of the Bluetooth stack: only that makes the phone see its link close (closeLink() closes our end).
+bool AlpsSppLink::requestSppDisconnect() {
+    ++sppDrops;
+    return true;
+}
+// The access point is made ready (no U-APSD) once before every handshake, never during one.
+UapsdOffer withdrawAccessPointUapsd() {
+    ++prepared;
+    return UapsdOffer::kWithdrawn;
+}
 }  // namespace evo
 namespace aa {
 WirelessSetup::WirelessSetup(int fd, const ApInfo& ap, uint16_t port, int peekMs)
-    : fd_(fd), ap_(ap), port_(port), peekMs_(peekMs), foreign_(false), spoke_(true) {}
+    : fd_(fd), ap_(ap), port_(port), peekMs_(peekMs), foreign_(false), spoke_(true), heard_(0) {}
 bool WirelessSetup::handshake(int) {
     assert(fd_ == 42 && peekMs_ == 300 && port_ == 50000);
+    assert(prepared == starts + 1);
     pthread_mutex_lock(&instance->mu);
     instance->tcpPreparing = true;
     pthread_mutex_unlock(&instance->mu);
-    fixtureLink = false;
+    if (!phoneKeepsLink) {
+        fixtureLink = false;
+    }
     ++starts;
     return true;
 }
 bool WirelessSetup::serve(int) {
-    return false;
+    if (!phoneKeepsLink) {
+        return false;
+    }
+    ++serves;
+    usleep(10000);
+    return fixtureLink;
+}
+bool WirelessSetup::listen(int) {
+    ++listens;
+    usleep(10000);
+    return true;
 }
 }  // namespace aa
 static void preparing(bool value) {
@@ -70,6 +96,101 @@ static void awaitStarts(int count) {
         usleep(10000);
     }
     assert(starts == count);
+}
+static void awaitServes() {
+    const int before = serves;
+    for (unsigned i = 0; i < 200 && serves < before + 3; ++i) {
+        usleep(10000);
+    }
+    assert(serves >= before + 3);
+}
+static bool linkClosedWithin(unsigned ms) {
+    for (unsigned i = 0; i < ms / 10 && fixtureLink; ++i) {
+        usleep(10000);
+    }
+    return !fixtureLink;
+}
+// A session on a socketpair that ends by itself, without ByeBye: the phone's side of the connection closes.
+static void loseSession(evo::ServiceApp& app) {
+    int pair[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+    assert(app.session.start(pair[0]) && app.session.isActive());
+    preparing(false);  // the connection is set up: the session alone keeps the projection busy
+    usleep(50000);
+    assert(fixtureLink);  // a running session leaves the link alone
+    close(pair[1]);
+    for (unsigned i = 0; i < 200 && app.session.isActive(); ++i) {
+        usleep(10000);
+    }
+    assert(!app.session.isActive());
+}
+
+static void mediaClicks(evo::ServiceApp& app) {
+    const unsigned states[] = {0, 1, 0, 1, 0};
+    for (unsigned i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
+        evo::ServiceApp::mediaKey(states[i], &app);
+    }
+}
+
+static void mediaRecall(evo::ServiceApp& app) {
+    const char* request = evo::contract::kMediaRecallFile;
+    unlink(request);
+    quitFlag = 0;
+    app.ready = app.videoEnabled = true;
+    app.focus = false;
+    mediaClicks(app);
+    assert(!app.focus && evo::takeMediaRecall(request, static_cast<int>(getpid()), evo::monoMs()));
+    assert(!evo::takeMediaRecall(request, static_cast<int>(getpid()), evo::monoMs()));
+    // Every gate is checked while the real socketpair session is active.
+    bool* gates[] = {&app.focus, &app.asking, &app.reverse, &app.inCall, &app.stopping};
+    for (unsigned i = 0; i < sizeof(gates) / sizeof(gates[0]); ++i) {
+        *gates[i] = true;
+        mediaClicks(app);
+        assert(access(request, F_OK) != 0);
+        *gates[i] = false;
+    }
+    app.ready = false;
+    mediaClicks(app);
+    assert(access(request, F_OK) != 0);
+    app.ready = true;
+    quitFlag = 1;
+    mediaClicks(app);
+    assert(access(request, F_OK) != 0);
+    quitFlag = 0;
+    const char* verbs[] = {"call", "gear", "hide", "show", "quit"};
+    for (unsigned i = 0; i < sizeof(verbs) / sizeof(verbs[0]); ++i) {
+        app.focus = app.reverse = app.inCall = false;
+        quitFlag = 0;
+        mediaClicks(app);
+        assert(access(request, F_OK) == 0);
+        evo::ControlCommand command;
+        command.verb = verbs[i];
+        command.arg = i == 1 ? 2 : 1;
+        command.hasArg = i < 2;
+        evo::ServiceApp::command(command, &app);
+        assert(access(request, F_OK) != 0);  // a queued request cannot outlive a guard or focus change
+    }
+    app.focus = app.reverse = app.inCall = false;
+    quitFlag = 0;
+    evo::ServiceApp::mediaKey(0, &app);
+    evo::ServiceApp::mediaKey(1, &app);
+    evo::ServiceApp::mediaKey(0, &app);
+    evo::ControlCommand call;
+    call.verb = "call";
+    call.hasArg = true;
+    call.arg = 1;
+    evo::ServiceApp::command(call, &app);
+    call.arg = 0;
+    evo::ServiceApp::command(call, &app);
+    evo::ServiceApp::mediaKey(1, &app);
+    evo::ServiceApp::mediaKey(0, &app);
+    assert(access(request, F_OK) != 0);  // two clicks straddling a call never pair
+    app.mediaPress.cancel();
+    app.videoEnabled = app.ready = false;
+    app.focus = true;
+    puts(
+        "PASS service double MEDIA: live session, guarded request only, focus unchanged, queued and partial gestures "
+        "cancelled");
 }
 // One main-loop turn of the peeks, Android Auto on screen or not (no video in this test).
 static void onScreen(evo::ServiceApp& app, bool on, uint32_t later = 0) {
@@ -128,6 +249,28 @@ int main() {
         app.pendingFocus = 0;
         onScreen(app, false);
     }
+    {  // "await": the next session starts aside and says so, until "show"; "hide" ends the wait too
+        evo::ControlCommand await, show, hide;
+        await.verb = "await";
+        show.verb = "show";
+        hide.verb = "hide";
+        await.hasArg = show.hasArg = hide.hasArg = false;
+        await.arg = show.arg = hide.arg = 0;
+        assert(!app.awaitShow && !app.asking);
+        evo::ServiceApp::command(await, &app);
+        assert(app.awaitShow && !app.asking && app.focus);  // nothing changes for a session already there
+        app.focus = false;  // as startProjection leaves it for a phone that connects now
+        app.asking = true;
+        evo::ServiceApp::command(show, &app);
+        assert(app.focus && !app.asking && app.pendingFocus == 1 && app.awaitShow);
+        app.focus = false;
+        app.asking = true;
+        evo::ServiceApp::command(hide, &app);
+        assert(!app.focus && !app.asking && app.pendingFocus == 2);
+        app.focus = true;
+        app.pendingFocus = 0;
+        app.awaitShow = false;  // the rest of this test: a service that shows by itself
+    }
     {  // quit from the iDrive app reaches the main loop's flag
         evo::ControlCommand quit;
         quit.verb = "quit";
@@ -140,25 +283,58 @@ int main() {
     pthread_t thread;
     assert(pthread_create(&thread, 0, evo::ServiceApp::wireless, &app) == 0);
     usleep(250000);
-    assert(starts == 0 && waits == 0);
+    assert(starts == 0 && listens > 0);  // the link is listened to, no handshake goes into it
     preparing(false);
     awaitStarts(1);
     int peers[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, peers) == 0);
     assert(app.session.start(peers[0]) && app.session.isActive());
+    mediaRecall(app);
     preparing(false);
     fixtureLink = true;  // phone reopens SPP while TCP projection is active
+    const int listened = listens;
     usleep(350000);
-    assert(starts == 1 && app.session.isActive());
+    assert(starts == 1 && app.session.isActive() && listens > listened);
     app.session.stop();
+    app.ready = app.videoEnabled = true;
+    app.focus = false;
+    mediaClicks(app);
+    assert(access(evo::contract::kMediaRecallFile, F_OK) != 0);
+    app.ready = app.videoEnabled = false;
     close(peers[1]);
     awaitStarts(2);  // rearming is allowed only after the real session ended
+    {  // A phone that keeps its Bluetooth link after accepting (MINI F56, Galaxy Z Fold): a lost session closes the
+       // link, the phone opens it again and gets a new handshake. A session that is not the wireless loop's (USB) or
+       // that ended with ByeBye (tests/test_session_phone.cpp) leaves the link alone.
+        app.session.setDisconnectCallback(evo::ServiceApp::ended, &app);
+        phoneKeepsLink = true;
+        preparing(false);
+        fixtureLink = true;  // the phone opens the link
+        awaitStarts(3);
+        awaitServes();
+        assert(fixtureLink && app.lostSessions() == 0 && sppDrops == 0);
+        loseSession(app);
+        assert(app.lostSessions() == 1 && linkClosedWithin(2000) && sppDrops == 1);
+        fixtureLink = true;  // the phone opens it again at once
+        awaitStarts(4);
+        awaitServes();
+        pthread_mutex_lock(&app.mu);
+        app.projectionOverUsb = true;
+        pthread_mutex_unlock(&app.mu);
+        loseSession(app);
+        assert(app.lostSessions() == 1 && !linkClosedWithin(300) && starts == 4 && sppDrops == 1);
+        pthread_mutex_lock(&app.mu);
+        app.projectionOverUsb = false;
+        pthread_mutex_unlock(&app.mu);
+        phoneKeepsLink = false;
+    }
     app.requestStop();
     pthread_join(thread, 0);
     pthread_mutex_lock(&app.mu);
-    assert(app.wirelessDone && app.sppLinks == 2 && app.wppReply && app.wppAccepted);
+    assert(app.wirelessDone && app.sppLinks == 4 && app.wppReply && app.wppAccepted);
     pthread_mutex_unlock(&app.mu);
     puts(
-        "PASS actual wireless loop: no handshake during TCP preparation or active session, rearmed after session stop; "
-        "app commands and volume through the peeks; PC socketpair only");
+        "PASS actual wireless loop: no handshake during TCP preparation or active session, rearmed after session stop, "
+        "Bluetooth link closed after a lost wireless session; app commands and volume through the peeks; PC socketpair "
+        "only");
 }

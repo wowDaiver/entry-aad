@@ -8,6 +8,7 @@
 
 #include "evo_knob.hpp"
 #include "evo_touch.hpp"
+#include "media_recall.hpp"
 #define CHECK(x)                                                 \
     do {                                                         \
         if (!(x)) {                                              \
@@ -104,6 +105,35 @@ int main() {
     CHECK(frame(t, 1279, 479, 1, 48, ev) == 1 && ev[0].action == 0 && ev[0].p[0].x == 1279 && ev[0].p[0].y == 479);
     CHECK(t.releaseAll(ev, 16) == 1 && ev[0].action == 1 && t.activeCount() == 0);  // lost "up"
     CHECK(t.feed(pkt, 20, ev, 16) == -1);                                           // not a touch PDU
+    // A panel that sets bits 6-7 of the state byte (iDrive keeps them apart, bits 4-5 are the state): its drag is a
+    // press, moves and a release, not a tap. Before: states 5, 6, 7 were dropped and the finger looked lifted (#30).
+    evo::TouchTracker f45;
+    CHECK(frame(f45, 300, 200, 0x5, 0, ev) == 1 && ev[0].action == 0 && ev[0].p[0].x == 300);      // 01 01: down
+    CHECK(frame(f45, 340, 200, 0x6, 12, ev) == 1 && ev[0].action == 2 && ev[0].p[0].x == 340);     // 01 10: move
+    CHECK(frame(f45, 380, 205, 0xA, 24, ev) == 1 && ev[0].action == 2 && ev[0].p[0].x == 380);     // 10 10: move
+    CHECK(f45.activeCount() == 1);                                                                 // still down
+    CHECK(frame(f45, 380, 205, 0x7, 36, ev) == 1 && ev[0].action == 1 && f45.activeCount() == 0);  // 01 11: up
+    {
+        unsigned char raw[112];
+        aa::TouchContact c = {2, 0xE, 640, 240, 9};  // id 2, bits 6-7 = 11, state 2
+        aa::buildTouchFrame(raw, &c, 1, 0, 0);
+        aa::TouchReassembler r;
+        aa::TouchMsg msg[aa::kTouchMaxMsgs];
+        aa::TouchContact got[2];
+        int declared = 0;
+        CHECK(r.feed(raw, sizeof(raw), msg, aa::kTouchMaxMsgs) == 1 &&
+              aa::parseTouchStream(msg[0], got, 2, &declared) == 1 && declared == 1 && got[0].state == 2 &&
+              got[0].id == 2 && got[0].x == 640 && got[0].y == 240);
+    }
+    // A MINI: the phone's display starts 40 columns into the panel (its left margin) and is 1200x480. A finger is sent
+    // in the phone's pixels: 40 less, kept inside its display. Before, it landed 40 pixels right of it (#78, #88).
+    evo::TouchTracker mini;
+    mini.setOffset(-40, 0);
+    mini.setLimits(1199, 479);
+    CHECK(frame(mini, 100, 200, 1, 0, ev) == 1 && ev[0].action == 0 && ev[0].p[0].x == 60 && ev[0].p[0].y == 200);
+    CHECK(frame(mini, 20, 210, 2, 12, ev) == 1 && ev[0].p[0].x == 0);  // under the surround: the edge
+    CHECK(frame(mini, 1270, 479, 2, 24, ev) == 1 && ev[0].p[0].x == 1199 && ev[0].p[0].y == 479);
+    CHECK(frame(mini, 1270, 479, 3, 36, ev) == 1 && ev[0].action == 1 && mini.activeCount() == 0);
     // Before the picture: a finger that touches down is ignored until it lifts, even once the picture is up.
     evo::TouchTracker early;
     early.setPictureStarted(false);
@@ -116,6 +146,31 @@ int main() {
     early.setPictureStarted(false);  // picture gone mid-gesture: released where it was
     CHECK(frame(early, 100, 410, 2, 60, ev) == 1 && ev[0].action == 1 && ev[0].p[0].y == 400 &&
           early.activeCount() == 0);
+    // The picture steps aside (volume, popup, reverse, MENU) with a finger down on the phone, and its lift is decoded
+    // before the touch thread's next turn: the lift still goes to the phone, which would otherwise keep the finger
+    // down. Nothing else goes once the picture has left: no new touch, no drag, no lift of a finger it never saw.
+    {
+        evo::TouchTracker tr;
+        evo::PhoneFingers phone;
+        CHECK(frame(tr, 200, 100, 1, 0, ev) == 1 && phone.admit(ev[0], true) && phone.any());
+        CHECK(frame(tr, 210, 100, 2, 12, ev) == 1 && phone.admit(ev[0], true));
+        CHECK(frame(tr, 210, 100, 3, 24, ev) == 1 && ev[0].action == 1);
+        CHECK(phone.admit(ev[0], false) && !phone.any());  // the picture has gone: this lift goes all the same
+        CHECK(frame(tr, 300, 100, 1, 36, ev) == 1 && !phone.admit(ev[0], false));  // a new touch is iDrive's
+        CHECK(frame(tr, 300, 100, 3, 48, ev) == 1 && !phone.admit(ev[0], false) && !phone.any());  // so is its lift
+        CHECK(frame(tr, 400, 100, 1, 60, ev) == 1 && phone.admit(ev[0], true));  // the picture is back
+        CHECK(frame(tr, 420, 100, 2, 72, ev) == 1 && ev[0].action == 2 && !phone.admit(ev[0], false));
+        // Two fingers: the phone saw the first one go down, not the second one, which came after the picture left.
+        aa::TouchContact two[2] = {{0, 2, 420, 100, 9}, {1, 1, 600, 300, 9}};
+        unsigned char f2[112];
+        aa::buildTouchFrame(f2, two, 2, 0, 84);
+        CHECK(tr.feed(f2, sizeof(f2), ev, 16) == 1 && ev[0].action == 5 && !phone.admit(ev[0], false));
+        aa::buildTouchFrame(f2, two, 1, 0, 96);  // the second finger lifts
+        CHECK(tr.feed(f2, sizeof(f2), ev, 16) == 1 && ev[0].action == 6 && !phone.admit(ev[0], false));
+        two[0].state = 3;  // then the first one
+        aa::buildTouchFrame(f2, two, 1, 0, 108);
+        CHECK(tr.feed(f2, sizeof(f2), ev, 16) == 1 && ev[0].action == 1 && phone.admit(ev[0], false) && !phone.any());
+    }
     // The same message split over three datagrams.
     evo::TouchTracker s;
     unsigned char whole[112], parts[3 * 112];
@@ -184,14 +239,21 @@ int main() {
         aa::CcsDecoder hk;
         evo::configureHardKeys(hk);
         CHECK(hk.slotKey(aa::CcsDecoder::slotByName("MENU")) == 0 &&
-              hk.slotKey(aa::CcsDecoder::slotByName("OPTIONS")) == 0 &&
-              hk.slotKey(aa::CcsDecoder::slotByName("MAP")) == 0);            // iDrive's
+              hk.slotKey(aa::CcsDecoder::slotByName("OPTIONS")) == 0);               // iDrive's
+        CHECK(hk.slotKey(aa::CcsDecoder::slotByName("MAP")) == aa::AAK_NAVIGATION);  // as CarPlay's "maps:" (#1)
         CHECK(hk.slotKey(aa::CcsDecoder::slotByName("COM")) == aa::AAK_TEL);  // not KEYCODE_CALL (phone redialled)
         CHECK(hk.slotKey(aa::CcsDecoder::slotByName("NAV")) == aa::AAK_NAVIGATION);
         CHECK(hk.slotKey(aa::CcsDecoder::slotByName("MEDIA")) == aa::AAK_MEDIA);
         CHECK(hk.slotKey(aa::CcsDecoder::slotByName("BACK")) == aa::AAK_BACK);
         CHECK(evo::isAppKey(aa::AAK_TEL) && evo::isAppKey(aa::AAK_NAVIGATION) && evo::isAppKey(aa::AAK_MEDIA) &&
               !evo::isAppKey(aa::AAK_BACK) && !evo::isAppKey(0) && !evo::isAppKey(aa::AAK_CALL));
+        // BACK and tilt left also make iDrive move underneath (#43): Android Auto keeps the screen for them too.
+        CHECK(evo::keepsAndroidAuto(aa::AAK_TEL) && evo::keepsAndroidAuto(aa::AAK_NAVIGATION) &&
+              evo::keepsAndroidAuto(aa::AAK_MEDIA) && evo::keepsAndroidAuto(aa::AAK_BACK) &&
+              evo::keepsAndroidAuto(aa::AAK_DPAD_LEFT));
+        CHECK(!evo::keepsAndroidAuto(0) && !evo::keepsAndroidAuto(aa::AAK_DPAD_RIGHT) &&
+              !evo::keepsAndroidAuto(aa::AAK_DPAD_UP) && !evo::keepsAndroidAuto(aa::AAK_DPAD_DOWN) &&
+              !evo::keepsAndroidAuto(aa::AAK_DPAD_CENTER) && !evo::keepsAndroidAuto(aa::AAK_CALL));
         setenv("EVO_KEY_COM", "0", 1);  // the environment is never read
         aa::CcsDecoder ov;
         evo::configureHardKeys(ov);
@@ -284,6 +346,15 @@ int main() {
         CHECK(rec.n == 3 && rec.e[2].keycode == aa::AAK_TEL && rec.apps == 2);
         pv.data = k0;
         kk.onMessage(pv);
+        // BACK goes to Android Auto and is reported too: iDrive may walk back to the screen NAV opened.
+        uint8_t kBack[7] = {0, 1, 0, 0, 0, 0, 0};
+        pv.data = kBack;
+        kk.onMessage(pv);
+        CHECK(rec.n == 5 && rec.e[4].keycode == aa::AAK_BACK && rec.e[4].down == 1 && rec.apps == 3 &&
+              !strcmp(rec.appKey, "BACK"));
+        pv.data = k0;
+        kk.onMessage(pv);
+        CHECK(rec.n == 6 && rec.e[5].down == 0 && rec.apps == 3);  // the release is not reported
         // A press that reached Android Auto gets its release, once, even if the picture left meanwhile.
         {
             const int beforeHold = rec.n, appsBefore = rec.apps;
@@ -306,6 +377,32 @@ int main() {
             kk.setOwned(true);
             rec.n = beforeHold;  // the recorder keeps 16 events
             rec.apps = appsBefore;
+        }
+        // COM held when a call starts: its press went to Android Auto, so its release goes there too instead of
+        // iDrive's call screen, or the phone keeps the key down. A COM pressed during the call stays iDrive's.
+        {
+            const int beforeCall = rec.n, appsBefore = rec.apps, localsBefore = rec.locals;
+            pv.data = kCom;
+            kk.onMessage(pv);
+            CHECK(rec.n == beforeCall + 1 && rec.e[beforeCall].keycode == aa::AAK_TEL && rec.e[beforeCall].down == 1);
+            kk.setPhoneToIdrive(true);  // the call starts while COM is held
+            pv.data = k0;
+            kk.onMessage(pv);
+            CHECK(rec.n == beforeCall + 2 && rec.e[beforeCall + 1].keycode == aa::AAK_TEL &&
+                  rec.e[beforeCall + 1].down == 0 && rec.locals == localsBefore);
+            kk.setOwned(false);
+            kk.pollTurnForTest();  // nothing is left held: no second release when the picture goes
+            CHECK(rec.n == beforeCall + 2);
+            kk.setOwned(true);
+            pv.data = kCom;
+            kk.onMessage(pv);
+            pv.data = k0;
+            kk.onMessage(pv);
+            CHECK(rec.n == beforeCall + 2 && rec.locals == localsBefore + 1 && !strcmp(rec.localKey, "COM"));
+            kk.setPhoneToIdrive(false);
+            rec.n = beforeCall;
+            rec.apps = appsBefore;
+            rec.locals = localsBefore;
         }
         // An ignored controller instance must not change the state retained for status 7 (no information).
         const int beforeForeign = rec.n;
@@ -345,7 +442,7 @@ int main() {
         tv.data = t1;
         kk.onMessage(tv);  // one press
         CHECK(rec.n == before + 2 && rec.e[before].keycode == aa::AAK_TEL && rec.e[before].down == 1 &&
-              rec.e[before + 1].down == 0 && rec.apps == 3 && !strcmp(rec.appKey, "WHEEL_PHONE"));
+              rec.e[before + 1].down == 0 && rec.apps == 4 && !strcmp(rec.appKey, "WHEEL_PHONE"));
         tv.data = t0;
         kk.onMessage(tv);
         // Voice button 15.02.512 (same status byte): stays with iDrive, nothing reaches Android Auto.
@@ -396,6 +493,18 @@ int main() {
         lv.fkt = 0xC09;
         CHECK(!evo::decodeVolumeLevel(lv, level));
         lv.fkt = 0xC08;
+        // The whole array (PosX 0): its first record, the front display's. Another display's record is not ours.
+        uint8_t whole[8] = {0x00, 0x00, 21, 0, 40, 9, 0, 40}, second[5] = {0x02, 0x00, 9, 0, 40},
+                column[5] = {0x01, 0x01, 9, 0, 40};
+        lv.data = whole;
+        lv.len = 8;
+        CHECK(evo::decodeVolumeLevel(lv, level) && level.value == 21);
+        lv.len = 5;
+        lv.data = second;
+        CHECK(!evo::decodeVolumeLevel(lv, level));
+        lv.data = column;
+        CHECK(!evo::decodeVolumeLevel(lv, level));
+        lv.data = ok;
         static const uint8_t record[2] = {0x01, 0x00};
         evo::VmostMsgOut lg;
         evo::buildVmostGet(lg, 0x20, 0x00, 0xC08, record, 2);
@@ -451,6 +560,35 @@ int main() {
         CHECK(evo::decodeVolumeButton(vv, &st) == 1 && st == 1);
         vv.len = 2;
         CHECK(evo::decodeVolumeButton(vv, &st) == 0);  // short MFL frame
+        // The audio knob's push button, CECenterStack 15.0C.C04 [EPushButton]: 1 pressed, 0 released.
+        {
+            uint8_t pressed[1] = {1}, released[1] = {0};
+            evo::VmostMsgView ab = vv;
+            ab.inst = 0x0C;
+            ab.fkt = 0xC04;
+            ab.len = 1;
+            ab.data = pressed;
+            CHECK(evo::decodeAudioButton(ab) == 1 && evo::decodeVolumeButton(ab, &st) == 0);
+            ab.data = released;
+            CHECK(evo::decodeAudioButton(ab) == 0);
+            ab.data = pressed;
+            ab.inst = 0x02;
+            CHECK(evo::decodeAudioButton(ab) == 0);  // the steering wheel's instance
+            ab.inst = 0x0C;
+            ab.op = 0xF;
+            CHECK(evo::decodeAudioButton(ab) == 0);
+            ab.op = 0xC;
+            struct Presses {
+                static void cb(void* u) { ++*static_cast<unsigned*>(u); }
+            };
+            unsigned presses = 0;
+            evo::EvoKnob kb;
+            kb.setAudioButtonCallback(Presses::cb, &presses);
+            kb.onMessage(ab);
+            ab.data = released;
+            kb.onMessage(ab);
+            CHECK(presses == 1);
+        }
         struct Count {
             static void cb(unsigned s, void* u) { *static_cast<unsigned*>(u) += s; }
         };
@@ -486,10 +624,190 @@ int main() {
         assert(d.feed(0xE5, 0x01, 0xC20, 0xC, menu, 7, ev, 8) == 1 && ev[0].keycode == aa::AAK_HOME && ev[0].down);
         assert(d.feed(0xE5, 0x03, 0xC10, 0xC, detent, 7, ev, 8) == 0);  // not on the CCS35up instance
     }
+    {  // Which protocol is read: the older one only on a car whose controller is silent on CCS35up.
+        using aa::CcsProtocol;
+        CcsProtocol never;
+        CHECK(!never.olderDue(60000) && never.kind() == CcsProtocol::kUnknown);  // nothing was read yet
+        CcsProtocol g20;  // answers its reads at once: never asked for the older functions
+        g20.ccs35upAsked(1000);
+        CHECK(g20.accept(0x03, 0xC46) && g20.kind() == CcsProtocol::kCcs35up);
+        CHECK(!g20.olderDue(1000 + CcsProtocol::kSilenceMs) && !g20.olderDue(600000));
+        CHECK(!g20.accept(0x01, 0xC10) && !g20.accept(0x01, 0xC20) && g20.accept(0x03, 0xC4F));
+        CHECK(g20.accept(0x01, 0xC30));  // a function of neither protocol is not judged
+        CcsProtocol i3;                  // silent on CCS35up: asked once, then kept on the older protocol
+        i3.ccs35upAsked(0xFFFFFF00u);    // the clock wraps while waiting
+        CHECK(i3.accept(0x01, 0xC30) && i3.kind() == CcsProtocol::kUnknown);
+        CHECK(!i3.olderDue(0xFFFFFF00u + CcsProtocol::kSilenceMs - 1));
+        CHECK(i3.olderDue(0xFFFFFF00u + CcsProtocol::kSilenceMs) && !i3.olderDue(5000));
+        CHECK(i3.accept(0x01, 0xC10) && i3.kind() == CcsProtocol::kOlder && !i3.accept(0x03, 0xC46));
+        CHECK(CcsProtocol::of(0x03, 0xC10) == CcsProtocol::kUnknown &&
+              CcsProtocol::of(0x01, 0xC46) == CcsProtocol::kUnknown);
+
+        // Through EvoKnob: the older controller's knob and BACK reach Android Auto, a later CCS35up message does not.
+        struct Got {
+            static void ev(const aa::CcsEvent& e, void* u) {
+                Got* g = static_cast<Got*>(u);
+                if (g->n < 8) {
+                    g->e[g->n++] = e;
+                }
+            }
+            aa::CcsEvent e[8];
+            int n;
+        } got;
+        memset(&got, 0, sizeof(got));
+        evo::EvoKnob old;
+        old.attachForTest(evo::INPUT_FORWARD, &Got::ev, &got);
+        old.setOwned(true);
+        evo::VmostMsgView ov;
+        ov.addr = 0x0100;
+        ov.fblock = 0xE5;
+        ov.inst = 0x01;
+        ov.op = 0xC;
+        const uint8_t other[4] = {0x01, 0x1D, 0x06, 0x00};  // the i3's only E5 message before the fix
+        ov.fkt = 0xC30;
+        ov.len = 4;
+        ov.data = other;
+        old.onMessage(ov);
+        CHECK(got.n == 0 && old.protocol() == CcsProtocol::kUnknown);
+        const uint8_t base[7] = {0x01, 0x1D, 0x21, 0x00, 0x10, 0x1E, 0x00};
+        const uint8_t detent[7] = {0x01, 0x1D, 0x22, 0x00, 0x11, 0x1E, 0x00};
+        ov.fkt = 0xC10;
+        ov.len = 7;
+        ov.data = base;
+        old.onMessage(ov);
+        ov.data = detent;
+        old.onMessage(ov);
+        CHECK(old.protocol() == CcsProtocol::kOlder && got.n == 1 && got.e[0].kind == 2 && got.e[0].delta == 1);
+        const uint8_t back[7] = {0x01, 0x1D, 0x23, 0x01, 0x00, 0x00, 0x02};
+        ov.fkt = 0xC20;
+        ov.data = back;
+        old.onMessage(ov);
+        CHECK(got.n == 2 && got.e[1].keycode == aa::AAK_BACK && got.e[1].down == 1);
+        const uint8_t turned[8] = {0x0C, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF};
+        const uint8_t turnedOn[8] = {0x0D, 0x80, 0x01, 0x00, 0x00, 0x00, 0x00, 0xFF};
+        ov.inst = 0x03;
+        ov.fkt = 0xC46;
+        ov.len = 8;
+        ov.data = turned;
+        old.onMessage(ov);
+        ov.data = turnedOn;
+        old.onMessage(ov);
+        CHECK(got.n == 2);  // the other protocol is left out: one action, one event
+    }
+    {  // Which key each button is, from the car's coding, as iDrive reads it (controller_layout.hpp).
+        using aa::ControllerCoding;
+        const ControllerCoding g = aa::defaultControllerCoding();  // no coding file: the table used before
+        CHECK(!g.known && g.gStyle);
+        const unsigned bits[7] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40};
+        for (int i = 0; i < 7; ++i) {
+            CHECK(aa::olderSensorSlot(bits[i], g) == i && aa::ccs35upByteSlot(i, g) == i);  // G: bit n = byte n
+        }
+        ControllerCoding f = g;  // F20 ZBE3 (#55): no G-style variant
+        f.known = true;
+        f.gStyle = false;
+        CHECK(aa::olderSensorCode(0x08, f) == 5 && aa::olderSensorSlot(0x08, f) == aa::kSlotMedia);  // its media key
+        CHECK(aa::olderSensorCode(0x40, f) == 6 && aa::olderSensorSlot(0x40, f) == aa::kSlotCom);
+        CHECK(aa::olderSensorCode(0x20, f) == 17 && aa::olderSensorSlot(0x20, f) == aa::kSlotNav);  // F's NAV key
+        CHECK(aa::olderSensorSlot(0x01, f) == aa::kSlotMenu && aa::olderSensorSlot(0x02, f) == aa::kSlotBack &&
+              aa::olderSensorSlot(0x04, f) == aa::kSlotOptions && aa::olderSensorSlot(0x10, f) == aa::kSlotMedia);
+        CHECK(aa::ccs35upByteSlot(3, f) == aa::kSlotMedia && aa::ccs35upByteSlot(5, f) == aa::kSlotNav &&
+              aa::ccs35upByteSlot(6, f) == aa::kSlotCom);
+        ControllerCoding f5141 = f;  // the F20 of #55 as it reported it (b80=0 5141=1 4e59=1 4f1e=0 5486=0 role=1):
+        f5141.v5141 = true;          // its MEDIA (0x08) is iDrive's code 15, MEDIA for Android Auto; COM still COM
+        f5141.v4f1e = f5141.v5486 = false;
+        f5141.role = 1;
+        CHECK(aa::olderSensorCode(0x08, f5141) == 15 && aa::olderSensorSlot(0x08, f5141) == aa::kSlotMedia);
+        CHECK(aa::olderSensorSlot(0x40, f5141) == aa::kSlotCom && aa::olderSensorSlot(0x20, f5141) == aa::kNoSlot);
+        ControllerCoding fNoTel = f;  // without 0x4E59, 0x40 is nothing on an F controller
+        fNoTel.v4e59 = false;
+        CHECK(aa::olderSensorSlot(0x40, fNoTel) == aa::kNoSlot);
+        ControllerCoding gRole1 = g;  // G, role 1, without 0x4E59: 0x08 is iDrive's RADIO (5), MEDIA
+        gRole1.v4e59 = false;
+        gRole1.role = 1;
+        CHECK(aa::olderSensorCode(0x08, gRole1) == 5 && aa::olderSensorSlot(0x08, gRole1) == aa::kSlotMedia);
+        ControllerCoding noNav = g;  // neither 0x4F1E nor 0x5486: 0x20 is no key
+        noNav.v4f1e = noNav.v5486 = false;
+        CHECK(aa::olderSensorSlot(0x20, noNav) == aa::kNoSlot);
+        CHECK(aa::olderSensorSlot(0x03, g) == aa::kNoSlot && aa::olderSensorSlot(0x80, g) == aa::kNoSlot);
+
+        char line[96];
+        aa::formatControllerCoding(f, line, sizeof(line));
+        CHECK(!strcmp(line, "coding b80=0 5141=0 4e59=1 4f1e=1 5486=1 role=0"));
+        ControllerCoding back = g;
+        CHECK(aa::parseControllerCoding(line, back) && back.known && !back.gStyle && back.v4e59 && back.role == 0);
+        CHECK(aa::parseControllerCoding("coding b80=1 5141=1 4e59=0 4f1e=0 5486=1 role=2\n", back) && back.gStyle &&
+              back.v5141 && !back.v4e59 && !back.v4f1e && back.v5486 && back.role == 2);
+        ControllerCoding kept = g;
+        CHECK(!aa::parseControllerCoding("coding b80=2 5141=0 4e59=1 4f1e=1 5486=1 role=0", kept) && !kept.known);
+        CHECK(!aa::parseControllerCoding("coding b80=1", kept) && !aa::parseControllerCoding(nullptr, kept));
+
+        // The F20 own messages (#55), with its reported coding: MEDIA (0x08) is MEDIA, COM (0x40) is COM.
+        aa::CcsDecoder d;
+        evo::configureHardKeys(d);
+        d.setCoding(f5141);  // the coding the F20 reported
+        aa::CcsEvent ev[8];
+        const uint8_t media[7] = {0x01, 0x1D, 0x3F, 0x01, 0x00, 0x00, 0x08};
+        CHECK(d.feed(0xE5, 0x01, 0xC20, 0xC, media, 7, ev, 8) == 1 && ev[0].keycode == aa::AAK_MEDIA && ev[0].down &&
+              !strcmp(ev[0].what, "MEDIA"));
+        const uint8_t mediaUp[7] = {0x01, 0x1D, 0x40, 0x00, 0x00, 0x00, 0x08};
+        CHECK(d.feed(0xE5, 0x01, 0xC20, 0xC, mediaUp, 7, ev, 8) == 1 && ev[0].keycode == aa::AAK_MEDIA && !ev[0].down);
+        const uint8_t com[7] = {0x01, 0x1D, 0xF1, 0x01, 0x00, 0x00, 0x40};
+        CHECK(d.feed(0xE5, 0x01, 0xC20, 0xC, com, 7, ev, 8) == 1 && ev[0].keycode == aa::AAK_TEL &&
+              !strcmp(ev[0].what, "COM"));
+        CHECK(d.sensorSlot(0x08) == aa::kSlotMedia && d.sensorSlot(0x40) == aa::kSlotCom);
+        // A CCS35up on an F coding: byte 3 (iDrive's RADIO) is MEDIA, byte 6 COM, each with its own state.
+        aa::CcsDecoder c;
+        evo::configureHardKeys(c);
+        c.setCoding(f);
+        const uint8_t radio[7] = {0, 0, 0, 1, 0, 0, 0}, radioAndMedia[7] = {0, 0, 0, 1, 1, 0, 0}, none[7] = {0};
+        CHECK(c.feed(0xE5, 0x03, 0xC47, 0xC, radio, 7, ev, 8) == 1 && ev[0].keycode == aa::AAK_MEDIA && ev[0].down);
+        CHECK(c.feed(0xE5, 0x03, 0xC47, 0xC, radioAndMedia, 7, ev, 8) == 1 && ev[0].keycode == aa::AAK_MEDIA);
+        CHECK(c.feed(0xE5, 0x03, 0xC47, 0xC, none, 7, ev, 8) == 2 && !ev[0].down && !ev[1].down);
+
+        // Double MEDIA through EvoKnob on the F20: its media key (0x08) is seen, COM (0x40) cancels the gesture.
+        struct Media {
+            static void cb(unsigned state, void* u) {
+                Media* m = static_cast<Media*>(u);
+                if (m->n < 8) {
+                    m->s[m->n++] = state;
+                }
+            }
+            static void key(const aa::CcsEvent&, void*) {}
+            unsigned s[8];
+            int n;
+        } seen;
+        memset(&seen, 0, sizeof(seen));
+        evo::EvoKnob f20;
+        f20.attachForTest(evo::INPUT_FORWARD, &Media::key, &seen);
+        f20.setCoding(f5141);
+        f20.setMediaCallback(&Media::cb, &seen);
+        evo::VmostMsgView mv;
+        mv.addr = 0x0100;
+        mv.fblock = 0xE5;
+        mv.inst = 0x01;
+        mv.fkt = 0xC20;
+        mv.op = 0xC;
+        mv.len = 7;
+        mv.data = media;
+        f20.onMessage(mv);
+        mv.data = mediaUp;
+        f20.onMessage(mv);
+        // An edge-only protocol: released before the press, then pressed, then released.
+        CHECK(seen.n == 3 && seen.s[0] == 0 && seen.s[1] == 1 && seen.s[2] == 0);
+        const int before = seen.n;
+        mv.data = com;
+        f20.onMessage(mv);
+        CHECK(seen.n > before && seen.s[seen.n - 1] == evo::MediaDoublePress::kOtherInput);
+    }
     puts(
-        "PASS ancienne molette BMW (C10/C20) ; entrees : IPv4/UDP de la copie, machine tactile (appui, glisse, "
-        "relache, doublon, trame fragmentee, relache forcee, rien avant l'image), message vMOST -> decodeur molette ; "
+        "PASS ancienne molette BMW (C10/C20), lue seulement si la CCS35up reste muette, un seul protocole par voiture "
+        "; "
+        "entrees : IPv4/UDP de la copie, machine tactile (appui, glisse, "
+        "relache, doublon, trame fragmentee, relache forcee, rien avant l'image, relache d'un doigt vu par le "
+        "telephone apres le depart de l'image), message vMOST -> decodeur molette ; "
         "touches comme CarPlay (effleurement ignore, NAV/MEDIA/COM et bouton telephone du volant -> applis AA, COM a "
-        "l iDrive pendant un appel) ; boutons de volume console/volant decodes ; niveau du volume (20.00.C08)");
+        "l iDrive pendant un appel, sauf le relache d'un COM appuye avant) ; touches selon le codage de la voiture, "
+        "comme l iDrive (controleur G ou F, F20 ZBE3 #55, double MEDIA) ; boutons de volume console/volant decodes ; "
+        "niveau du volume (20.00.C08)");
     return 0;
 }

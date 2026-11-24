@@ -61,6 +61,8 @@ public:
     bool surfaceAbsent(uint32_t surfaceId);
     // Raw output of a "get ..." command.
     std::string get(const char* what, uint32_t id);
+    // The size of screen 0, the panel. False when the compositor does not give it.
+    bool screenSize(uint32_t& w, uint32_t& h);
 
     // Pure parsers.
     static bool parseRenderOrder(const std::string& txt, std::vector<uint32_t>& out);

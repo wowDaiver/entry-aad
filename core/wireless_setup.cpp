@@ -152,7 +152,8 @@ WirelessSetup::WirelessSetup(int fd, const ApInfo& ap, uint16_t port, int peekMs
       port_(port),
       peekMs_(peekMs < 0 ? 0 : (peekMs > kMaxPeekMs ? kMaxPeekMs : peekMs)),
       foreign_(false),
-      spoke_(false) {}
+      spoke_(false),
+      heard_(0) {}
 
 bool WirelessSetup::write(const std::vector<uint8_t>& message) {
     printf("[Wireless] RAW TX t=%llu +%u\n", static_cast<unsigned long long>(monotonicMs()),
@@ -382,6 +383,28 @@ bool WirelessSetup::handshake(int timeoutMs) {
             return false;
         }
     }
+}
+
+bool WirelessSetup::listen(int waitMs) {
+    const Fill filled = fill(waitMs);
+    uint16_t id;
+    std::vector<uint8_t> body;
+    while (next(id, body)) {
+        ++heard_;
+        if (id == kPingRequest) {
+            printf("[Wireless] ping while Android Auto runs -> pong\n");
+            if (!write(wireMessage(kPingResponse, body))) {
+                return false;
+            }
+            continue;
+        }
+        printf("[Wireless] while Android Auto runs the phone sent msg id=%u len=%u: not answered\n", id,
+               static_cast<unsigned>(body.size()));
+        if (!body.empty()) {
+            printBytes("   payload", &body[0], body.size(), 64);
+        }
+    }
+    return filled != kGone;
 }
 
 bool WirelessSetup::serve(int waitMs) {

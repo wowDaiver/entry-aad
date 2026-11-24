@@ -280,8 +280,10 @@ int main() {
         CHECK(link.start(2));
         CHECK(!link.ensureDataInterface(false, 1000));
         CHECK(fake.writes == 0);
+        // Slot 2: the stack answers its reads with slot 0's value, so nothing is read, the write's status decides.
+        const int readsBefore = fake.reads;
         CHECK(link.ensureDataInterface(true, 1000));
-        CHECK(fake.writes == 1);
+        CHECK(fake.writes == 1 && fake.reads == readsBefore && fake.config == 1);
         CHECK(link.registerUuid(evo::kAaUuid, 1000) == 0);
         fake.device(true, 1);
         fake.device(true, 2, 2);
@@ -365,6 +367,19 @@ int main() {
         }
         CHECK(!link.linkUp());
         link.closeLink();
+    }
+    {
+        // A slot the stack reads back (0 or 1): read, written, read back; nothing written when already 1.
+        CHECK(evo::slotConfigurationReadable(0) && evo::slotConfigurationReadable(1));
+        CHECK(!evo::slotConfigurationReadable(2) && !evo::slotConfigurationReadable(5));
+        evo::AlpsSppLink link;
+        CHECK(link.start(1));
+        fake.config = 0;
+        const int reads = fake.reads, writes = fake.writes;
+        CHECK(link.ensureDataInterface(true, 1000));
+        CHECK(fake.writes == writes + 1 && fake.reads == reads + 2 && fake.config == 1);
+        CHECK(link.ensureDataInterface(true, 1000) && fake.writes == writes + 1 && fake.reads == reads + 3);
+        CHECK(link.setDataInterface(0, 1000) && fake.config == 0 && fake.reads == reads + 4);
     }
     {
         evo::AlpsSppLink link;

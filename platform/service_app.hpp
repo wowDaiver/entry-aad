@@ -24,10 +24,13 @@
 #include "evo_mic.hpp"
 #include "evo_pill.hpp"
 #include "evo_video.hpp"
+#include "kombi_most.hpp"
 #include "kombi_nav.hpp"
+#include "media_recall.hpp"
 #include "peek_timing.hpp"
 #include "tcp_server.hpp"
 #include "usb_loop.hpp"
+#include "volume_state.hpp"
 #include "wifi_link.hpp"
 #include "wireless_loop.hpp"
 #include "wireless_setup.hpp"
@@ -43,6 +46,7 @@ public:
         bool failed;          // the wireless or USB loop has ended: the service stops
         bool active;          // an Android Auto session runs
         bool onScreen;        // what the iDrive app is told (peeks included)
+        bool asks;            // connected, and aside until the iDrive app says "show" (it is told that too)
         bool shown;           // the picture is on screen, not stepped aside
         bool pictureUp;       // the compositor shows our surface
         bool pictureStarted;  // the first picture has arrived
@@ -60,9 +64,9 @@ public:
     // Session, focus and peeks into what shows: the video layer, its opacity, the pill. Holds videoMu while
     // LayerManagerControl runs. service: started by the iDrive app (aa-supervisor --service).
     Turn turn(bool service);
-    // Registers the Android Auto UUID again while nothing is connected (refreshAdvertisement). False when that
-    // failed and the service must stop.
-    bool refreshAdvertisementIfIdle(bool service, SppSnapshotReader& reader);
+    // Registers the Android Auto UUID again on its SPP slot while nothing is connected (refreshAdvertisement). False
+    // when that failed and the service must stop.
+    bool refreshAdvertisementIfIdle(bool service, SppSnapshotReader& reader, unsigned slot);
     // Car day/night (CDS vehicle.dayNightChangeOver via the iDrive app): 1 day, 2 night, 0 no change, 3 invalid.
     void applyDayNight(int v, const char* src);
 
@@ -72,9 +76,11 @@ public:
     static void touchEvent(const aa::TouchEventOut& ev, void* user);
     static void volumeEvent(unsigned steps, void* user);
     static void volumeLevel(const VolumeLevel& level, void* user);
+    static void audioButton(void* user);
     static void hardKey(const char* name, void* user);
     static void knobEvent(const aa::CcsEvent& ev, void* user);
     static void appKey(const char* name, void* user);
+    static void mediaKey(unsigned state, void* user);
     static void command(const ControlCommand& c, void* user);
     static void videoFocus(bool projected, uint32_t reason, void* user);
     static void micRequest(bool open, void* user);
@@ -89,7 +95,9 @@ public:
     bool stopRequested() override;
     bool projectionBusy() override;
     void sppLinkOpened() override;
+    void prepareAccessPoint() override;
     void handshakeEnded(bool spoke, bool accepted) override;
+    unsigned lostSessions() override;
 
     // ---- UsbHost (stopRequested and projectionBusy are shared) ----
     void usbPhoneReady(int fd) override;
@@ -99,8 +107,9 @@ public:
     AlpsSppLink bt;
     EvoVideo video;
     aa::AASession session;
-    EvoMic mic;                // car mic for the Assistant (stopped before the session it posts to)
-    evo::kombi::Arrows kombi;  // AA turn-by-turn -> HUD/cluster arrows, SOME/IP 0xB006 to the KOMBI
+    EvoMic mic;                     // car mic for the Assistant (stopped before the session it posts to)
+    evo::kombi::MostHud kombiMost;  // F-series cluster over MOST, on the controller reader (destroyed after kombi)
+    evo::kombi::Arrows kombi;       // AA turn-by-turn -> HUD/cluster arrows, SOME/IP 0xB006 to the KOMBI
     aa::TcpServer server;
     aa::ApInfo ap;
     EvoVideoConfig videoConfig;
@@ -114,14 +123,22 @@ public:
     // always after connectMu and never while holding mu.
     pthread_mutex_t mu, connectMu, videoMu;
     bool stopping, wirelessDone, focus, ready, tcpPreparing;
-    bool reverse;      // service: reverse gear from the iDrive app hides the picture (camera)
+    bool reverse;                 // service: reverse gear from the iDrive app hides the picture (camera)
+    bool parkAssist;              // service: park assist owns the screen (iDrive app, "pdc 1"): picture hidden
+    bool inCall;                  // MEDIA recall never covers iDrive's call screen
+    MediaDoublePress mediaPress;  // under mu, fed by the existing vMOST reader
+    bool awaitShow;    // service: the iDrive app asked ("await") that a phone that connects waits aside for its "show"
+    bool asking;       // service: such a session, not shown yet
     int pendingFocus;  // service: 1 tell the phone FOCUSED, 2 NATIVE (sent from the main loop)
     PeekTiming peek;   // under mu
+    VolumeState volume;  // under mu
     EvoPill pill;
     WifiLinkLog wifiLink;  // the Wi-Fi link's quality, logged while a wireless session runs
     unsigned sppLinks, tcpLinks, usbLinks;
     std::atomic<unsigned> videoFrames;  // counted on the session thread without mu
     bool wppReply, wppAccepted;
+    bool projectionOverUsb;  // the last session came over USB (its loss is not the wireless loop's business)
+    unsigned lostWireless;   // wireless sessions ended without ByeBye
 
 private:
     // A phone connection, from the TCP listener or the USB loop: the video is made ready and the session starts.

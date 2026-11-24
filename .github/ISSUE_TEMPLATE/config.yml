@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security issue
-    url: https://github.com/Jiraiya43/entry-aad/security/advisories/new
+    url: https://github.com/Jiraiya43/EntryNav2-Android-Auto/security/advisories/new
     about: Please report security issues privately.
   - name: Question
-    url: https://github.com/Jiraiya43/entry-aad/discussions
-    about: Questions about installing or using entry-aad.
+    url: https://github.com/Jiraiya43/EntryNav2-Android-Auto/discussions
+    about: Questions about installing or using EntryNav2 (EntryEvo) Android Auto.

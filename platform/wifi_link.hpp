@@ -4,9 +4,12 @@
 
 // Everything here only reads. Two sources, both the kernel's own figures:
 //   - nl80211 (generic netlink), the interface `iw` uses: the phone's station entry on the car's access point (signal,
-//     bitrates, frames sent, retried and lost) and the access point's frequency;
+//     bitrate from the phone, frames sent, retried and lost) and the access point's frequency;
 //     https://www.kernel.org/doc/html/latest/userspace-api/netlink/intro.html, include/uapi/linux/nl80211.h
+//     The rate towards the phone is left out: the WL18xx firmware chooses it, and the driver (wlcore) reported
+//     1 Mbit/s on every car, the reference G20 included, whatever was sent.
 //   - TCP_INFO on the Android Auto connection: round trip time and segments sent again.
+// Next to them, given by the service: whether a phone holds BMW Apps' Bluetooth link, which shares the radio chip.
 // Nothing identifies the phone in the log: no address is written.
 #ifndef ENTRY_AAD_PLATFORM_WIFI_LINK_HPP
 #define ENTRY_AAD_PLATFORM_WIFI_LINK_HPP
@@ -25,8 +28,8 @@ const int64_t kNoFigure = -0x7fffffffffffffffLL - 1;  // a figure the driver did
 // One phone on the access point, as nl80211 reports it.
 struct WifiStation {
     uint8_t mac[6];
-    int64_t signalDbm, signalAvgDbm;
-    int64_t txRate, rxRate;                 // in 100 kbit/s
+    int64_t signalDbm, signalAvgDbm;        // signalDbm: the last frame received, when the chip measured it
+    int64_t rxRate;                         // in 100 kbit/s
     int64_t txFrames, txRetries, txFailed;  // since the phone joined
     int64_t connectedS;                     // how long ago that was
     WifiStation();
@@ -46,6 +49,16 @@ struct TcpLink {
 // False when fd is not a TCP connection (a USB session uses a local socket).
 bool readTcpLink(int fd, TcpLink& out);
 
+// BMW Apps' Bluetooth slot (SPP 0: My BMW, AAIdrive, the phone's "Apps" option in the car's device settings). The
+// WL18xx chip carries both Bluetooth and Wi-Fi; wireless Android Auto was slow to start with Apps on (#71).
+struct AppsSlot {
+    bool read;          // false: not read (Android Auto uses SPP 0 itself, or the Alps tables were unreadable)
+    bool connected;     // a phone holds a link on it
+    uint32_t state;     // the slot's Alps state (1: started)
+    uint8_t transport;  // its serial link's state (0: none)
+    AppsSlot() : read(false), connected(false), state(0), transport(0) {}
+};
+
 struct WifiSample {
     uint32_t atMs;
     bool radio;         // nl80211 answered: the three fields below mean something
@@ -55,6 +68,7 @@ struct WifiSample {
     WifiStation station;
     bool hasTcp;
     TcpLink tcp;
+    AppsSlot apps;
     WifiSample();
 };
 
@@ -69,6 +83,10 @@ public:
     ~WifiLinkLog();
     // The access point's interface. Without this call nothing is ever read or logged.
     void enable(const char* interface);
+    // Reads BMW Apps' slot for each line, from the thread that calls turn(); false when it could not be read.
+    // Without it, the lines say nothing about Bluetooth.
+    typedef bool (*AppsProbe)(void* user, AppsSlot& out);
+    void setAppsProbe(AppsProbe probe, void* user);
     // The phone's TCP connection, from the thread that accepted it. fd stays the caller's: a copy is kept.
     void connected(int fd);
     // Main loop, every turn. The copy is closed as soon as the session is over.
@@ -82,6 +100,8 @@ private:
 
     pthread_mutex_t lock_;
     std::string interface_;
+    AppsProbe appsProbe_;
+    void* appsUser_;
     int fd_;  // copy of the phone's connection, -1 when none
     bool first_, seenActive_, hasBefore_, radioGone_;
     uint32_t nextMs_, sinceMs_;

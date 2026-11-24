@@ -43,4 +43,12 @@ private:
     bool peek_, decided_;
 };
 
+// Whether iDrive draws its driving mode popup at a mode change, so that Android Auto steps aside for it. setting:
+// iDrive's own popup setting; forced: the coding that shows it anyway (hmiapp/idrive_coding.hpp reads both); each 1,
+// 0, or -1 when it could not be read. Only a setting read off with nothing forcing it means no popup (#28: 3.5 s of
+// black at each change); otherwise Android Auto steps aside as it always did.
+inline bool driveModePopupExpected(int setting, int forced) {
+    return !(setting == 0 && forced == 0);
+}
+
 #endif

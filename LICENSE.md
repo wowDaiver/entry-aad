@@ -18,7 +18,7 @@ The licensor grants you an additional copyright license to distribute copies of 
 
 You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
 
-> Required Notice: Copyright (c) 2026 Jiraiya43 - entry-aad
+> Required Notice: Copyright (c) 2026 Jiraiya43 - EntryNav2 (EntryEvo) Android Auto
 
 ## Changes and New Works License
 
@@ -76,9 +76,10 @@ The **licensor** is the individual or entity offering these terms, and the **sof
 
 ## Credits
 
-entry-aad started as a port of [Supra-iDrive6-Android-Auto](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) by
-Sq00ky, then was reworked and extended for the BMW EntryNav2 head unit. Thanks to Sq00ky for that work and for agreeing
-to its distribution under the terms above.
+EntryNav2 (EntryEvo) Android Auto started as a port of
+[Supra-iDrive6-Android-Auto](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) by Sq00ky, then was reworked and
+extended for the BMW EntryNav2 head unit. Thanks to Sq00ky for that work and for agreeing to its distribution under the
+terms above.
 
 ### Material from others
 

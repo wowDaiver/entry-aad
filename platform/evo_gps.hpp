@@ -47,6 +47,13 @@ inline bool carGpsPresent() {
     struct stat s;
     return !phoneGpsChosen() && stat(carGpsSource(), &s) == 0 && gpsLayout(s.st_size);
 }
+// Android Auto 17.9 stops using the speed of the car's fixes for the rest of the session once one says 70 m/s or more
+// (found in its location code by Supra-iDrive6-Android-Auto, c2ad815). Every speed sent stays below it, once rounded
+// to the mm/s it goes in; a faster one is left out, never clamped.
+const double kGpsSpeedLimitMps = 70;
+inline bool gpsSpeedSendable(double speed) {
+    return speed >= 0 && speed < kGpsSpeedLimitMps - 0.0005;  // 69.9996 would go as 70000 mm/s
+}
 inline uint32_t gpsU32(const uint8_t* p) {
     uint32_t n;
     memcpy(&n, p, 4);
@@ -116,7 +123,7 @@ inline aa::CarLocation decodeGpsRecord(const std::vector<uint8_t>& r, uint64_t n
         memcpy(&heading, &r[32 + 16], 4);
         const uint32_t courseFlags =
             gpsU32(&r[32 + 20]);  // CarPlay cbCourse/RMC: bit 0 speed (m/s), bit 2 heading (degrees)
-        if ((courseFlags & 1) && isfinite(speed) && speed >= 0 && speed <= 150) {
+        if ((courseFlags & 1) && isfinite(speed) && gpsSpeedSendable(speed)) {
             p.hasSpeed = true;
             p.speedMps = speed;
             if ((courseFlags & 4) && isfinite(heading) && heading >= 0 && heading < 360 && speed >= 0.5f) {
@@ -147,7 +154,7 @@ inline aa::CarLocation decodeGpsRecord(const std::vector<uint8_t>& r, uint64_t n
     memcpy(&course, &r[44], 2);
     int32_t altitude;
     memcpy(&altitude, &r[20], 4);
-    if (speed <= 150) {
+    if (gpsSpeedSendable(speed)) {
         p.hasSpeed = true;
         p.speedMps = speed;
         if (speed >= 0.5 && course < 36000) {
@@ -161,7 +168,8 @@ inline aa::CarLocation decodeGpsRecord(const std::vector<uint8_t>& r, uint64_t n
     }
     return p;
 }
-// Fallback when the receiver gives no valid speed: two consecutive fixes. Coarse: the poll time is the only clock here.
+// Fallback when the receiver gives no valid speed: two consecutive fixes. Coarse: the poll time is the only clock here,
+// so a fix seen late makes a jump; one that would be too fast to send gives neither speed nor course.
 inline void gpsDerive(const aa::CarLocation& prev, aa::CarLocation& cur) {
     if (cur.hasSpeed || !prev.valid || cur.sampledMs < prev.sampledMs + 400) {
         return;
@@ -176,7 +184,7 @@ inline void gpsDerive(const aa::CarLocation& prev, aa::CarLocation& cur) {
         (cur.longitudeE6 - prev.longitudeE6) * metresPerE6 * cos(cur.latitudeE6 / 1000000.0 * M_PI / 180.0);
     const double d = sqrt(dx * dx + dy * dy);
     const double speed = d / dt;
-    if (speed > 150) {
+    if (!gpsSpeedSendable(speed)) {
         return;
     }
     cur.hasSpeed = true;

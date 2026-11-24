@@ -21,15 +21,26 @@ namespace aa {
 namespace {
 
 // Silence from the phone after which it is gone: a wireless phone can vanish without closing the socket, and its last
-// picture would stay on screen. It pings every second and reports its media status every second, even while iDrive
-// has the screen. Measured on the clock (tests/test_session_silence): car input wakes the thread about 10 times a
-// second. 5 s, so that a short Wi-Fi gap does not end the session.
+// picture would stay on screen. Measured on the clock (tests/test_session_silence): car input wakes the thread about
+// 10 times a second. 5 s, so that a short Wi-Fi gap does not end the session.
 const uint64_t kSilenceMs = 5000;
+// A phone does not always speak by itself. Some ping every second; others stop once iDrive has the screen and no
+// music plays (X3 G01 over USB: the session ended 5 s after MENU or MAP, PR #40). So after kPingAfterMs of silence,
+// once TLS is up, the head unit asks with a ping of its own, then again every kPingEveryMs. The answer is data like
+// any other; unanswered, the silence limit above still ends the session. Only data from the phone resets it.
+const uint64_t kPingAfterMs = 2000;
+const uint64_t kPingEveryMs = 1000;
+const unsigned kOwnPingsLogged = 5;  // then one in kOwnPingsLogEvery
+const unsigned kOwnPingsLogEvery = 300;
 const unsigned kFramesLoggedFirst = 40;  // per channel, then one frame in kFramesLoggedEvery
 const unsigned kFramesLoggedEvery = 300;
 const unsigned kKeysLogged = 200;  // evo_knob logs every key anyway
 const unsigned kMovesLogged = 40;
 const unsigned kMicrophoneLogEvery = 250;
+// Encrypted frames in a row that give nothing to read without breaking TLS: bytes of a record that never completes (a
+// part lost on the way). The session ends rather than wait for the silence limit with a frozen picture. A record that
+// fails its check breaks TLS at once (TlsClient::broken): the session ends at that frame.
+const unsigned kUnreadableLimit = 16;
 const int kTouchMove = 2;
 
 uint64_t monotonicUs() {
@@ -54,7 +65,17 @@ AASession::AASession()
       thread_(0),
       vehicleFile_(nullptr),
       softwareVersion_(nullptr),
+      carMake_(nullptr),
+      codedSide_(DriverPosition::kLeft),
+      codedModel_(nullptr),
+      longestSilenceMs_(0),
+      goodbye_(false),
+      lastReceivedMs_(0),
+      givenUp_(false),
       videoReady_(false),
+      projected_(false),
+      unreadableInARow_(0),
+      sendBroken_(false),
       mediaMessages_(0),
       microphoneChunks_(0) {
     pthread_mutex_init(&lifecycleLock_, nullptr);
@@ -116,6 +137,10 @@ void AASession::postVideoFocus(bool projected) {
     inbox_.postFocus(projected);
 }
 
+void AASession::postKeyframeRequest() {
+    inbox_.postKeyframeRequest();
+}
+
 void AASession::postNightMode(bool night) {
     inbox_.postNight(night);
 }
@@ -168,7 +193,7 @@ void AASession::closeSocket() {
 }
 
 void AASession::resetCounters() {
-    keysLogged_ = movesLogged_ = navigationLogged_ = pings_ = 0;
+    keysLogged_ = movesLogged_ = navigationLogged_ = pings_ = pingsAsked_ = pingAnswers_ = 0;
     playbackState_ = kNoField;
     memset(framesSeen_, 0, sizeof(framesSeen_));
 }
@@ -202,10 +227,18 @@ bool AASession::start(int client_fd) {
     assembler_.clear();
     inbox_.reset();
     videoReady_ = false;
+    projected_ = false;
+    keyframe_.reset();
+    unreadableInARow_ = 0;
+    sendBroken_ = false;
     microphoneChunks_ = 0;
     mediaMessages_ = 0;
     memset(mediaSessions_, 0, sizeof(mediaSessions_));
     audioMessages_[0] = audioMessages_[1] = 0;
+    lastReceivedMs_ = 0;  // the previous thread is joined
+    givenUp_ = false;
+    longestSilenceMs_.store(0);
+    goodbye_.store(false);  // after the ended callback of a session replaced above
     resetCounters();
     setRunning(true);
     if (pthread_create(&thread_, nullptr, &AASession::threadMain, this) != 0) {
@@ -243,14 +276,21 @@ void AASession::run() {
         finish();
         return;
     }
+    Message wire, plain, message;
+    const size_t kMaxRetainedMessage = 1u << 20;
     while (running()) {
         uint8_t channel = 0;
-        Message message;
-        const Received received = receive(channel, message);
-        if (received == kLost) {
+        const Received received = receive(channel, wire, plain, message);
+        const bool keepRunning = received != kMessage || dispatch(channel, message);
+        // A large fragmented message may be valid, but need not occupy memory for the rest of the connection.
+        if (message.capacity() > kMaxRetainedMessage) {
+            Message().swap(message);
+        }
+        if (received == kLost || !keepRunning || sendBroken_) {
             break;
         }
-        if (received == kMessage && !dispatch(channel, message)) {
+        if (givenUp_) {
+            printf("[AASession] The car gave the session up.\n");
             break;
         }
     }
@@ -275,8 +315,11 @@ void AASession::finish() {
 bool AASession::receiveExactly(uint8_t* to, size_t size) {
     size_t got = 0;
     uint64_t lastDataMs = locationClockMs();
+    uint64_t lastPingMs = 0;  // our last ping in this silence, 0: none yet
+    unsigned unanswered = 0;  // our pings sent in this silence
     const int wakeFd = inbox_.wakeFd();
-    while (got < size && running()) {
+    // The car input and our pings are sent from this loop: a send that fails there ends it too.
+    while (got < size && running() && !sendBroken_) {
         const int fd = socket_;
         if (fd < 0) {
             return false;
@@ -305,15 +348,26 @@ bool AASession::receiveExactly(uint8_t* to, size_t size) {
         }
         if (ready == 0 || !FD_ISSET(fd, &readable)) {
             // Silence is measured on the clock: car input wakes this loop far more often than once a second.
-            const uint64_t silentMs = locationClockMs() - lastDataMs;
+            const uint64_t nowMs = locationClockMs();
+            const uint64_t silentMs = nowMs - lastDataMs;
             if (silentMs >= kSilenceMs) {
-                printf("[AASession] No data from phone for %u s: treating session as dead.\n",
-                       static_cast<unsigned>(silentMs / 1000));
+                printf(
+                    "[AASession] No data from phone for %u s (%u pings of ours unanswered): treating session as "
+                    "dead.\n",
+                    static_cast<unsigned>(silentMs / 1000), unanswered);
                 return false;
+            }
+            if (silentMs >= kPingAfterMs && (!lastPingMs || nowMs - lastPingMs >= kPingEveryMs) && askPhone(silentMs)) {
+                lastPingMs = nowMs;
+                ++unanswered;
             }
             continue;
         }
         lastDataMs = locationClockMs();
+        if (lastReceivedMs_ && lastDataMs - lastReceivedMs_ > longestSilenceMs_.load()) {
+            longestSilenceMs_.store(static_cast<uint32_t>(lastDataMs - lastReceivedMs_));
+        }
+        lastReceivedMs_ = lastDataMs;
         const ssize_t n = recv(fd, to + got, size - got, 0);
         if (n < 0 && errno == EINTR) {
             continue;
@@ -326,7 +380,16 @@ bool AASession::receiveExactly(uint8_t* to, size_t size) {
     return got == size;
 }
 
+// A frame that did not go out whole breaks the stream for good: the phone reads the next frame as the rest of this one,
+// and a sealed frame moved the TLS sequence on even when none of it left. Most callers cannot do anything about a
+// failure, so the first one ends the session here, as lost rather than a goodbye (the service then calls the phone
+// back), and nothing more is sent. Seen with a Wi-Fi link that stalls past the send limit set in start(). Every send
+// runs on the session thread (car input is queued, then sent from its loop), so the flag needs no lock, and the
+// socket is closed by finish() as for any other end.
 bool AASession::sendExactly(const uint8_t* data, size_t size) {
+    if (sendBroken_) {
+        return false;
+    }
     size_t sent = 0;
     while (sent < size && running()) {
         const int fd = socket_;
@@ -338,6 +401,17 @@ bool AASession::sendExactly(const uint8_t* data, size_t size) {
             continue;
         }
         if (n <= 0) {
+            const int error = n < 0 ? errno : 0;
+            sendBroken_ = true;
+            if (running()) {  // not stop() or start() shutting the socket down
+                printf(
+                    "[AASession] Send to the phone failed after %u of %u bytes (%s): the stream is broken, session "
+                    "ends.\n",
+                    static_cast<unsigned>(sent), static_cast<unsigned>(size),
+                    error == EAGAIN || error == EWOULDBLOCK ? "timed out"
+                    : error                                 ? strerror(error)
+                                                            : "nothing sent");
+            }
             return false;
         }
         sent += static_cast<size_t>(n);
@@ -359,10 +433,27 @@ bool AASession::sendSealed(uint8_t channel, const Message& message, uint8_t flag
     return tls_.seal(&message[0], message.size(), records) && sendFrame(channel, flags, &records[0], records.size());
 }
 
-AASession::Received AASession::receive(uint8_t& channel, Message& message) {
+// Encrypted, as the phone sends its own. False before the TLS handshake ended: nothing can be sealed yet, and the
+// phone is busy with it anyway. A ping that could not be sealed counts as asked: the silence limit decides. One that
+// could not be sent ends the session, as any failed send does.
+bool AASession::askPhone(uint64_t silentMs) {
+    if (!tls_.established()) {
+        return false;
+    }
+    const bool sent = sendSealed(channel::kControl, message::pingRequest(monotonicUs()));
+    ++pingsAsked_;
+    if (!sent || pingsAsked_ <= kOwnPingsLogged || pingsAsked_ % kOwnPingsLogEvery == 0) {
+        printf("[AASession] phone silent for %u ms: PingRequest %u of ours %s\n", static_cast<unsigned>(silentMs),
+               pingsAsked_, sent ? "sent" : "SEND FAILED");
+    }
+    return true;
+}
+
+AASession::Received AASession::receive(uint8_t& channel, Message& wire, Message& plain, Message& message) {
     uint8_t raw[frame::kHeaderSize];
+    // After a failed send, which logged its own line, the reads below end quietly.
     if (!receiveExactly(raw, sizeof(raw))) {
-        if (running()) {
+        if (running() && !sendBroken_) {
             printf("[AASession] Phone closed socket or read error.\n");
         }
         return kLost;
@@ -376,7 +467,9 @@ AASession::Received AASession::receive(uint8_t& channel, Message& message) {
     if (header.announcesSize()) {
         uint8_t total[frame::kTotalSizeSize];
         if (!receiveExactly(total, sizeof(total))) {
-            printf("[AASession] Failed to read extended total_size header.\n");
+            if (!sendBroken_) {
+                printf("[AASession] Failed to read extended total_size header.\n");
+            }
             return kLost;
         }
         header.totalSize = decodeTotalSize(total);
@@ -390,35 +483,58 @@ AASession::Received AASession::receive(uint8_t& channel, Message& message) {
     if (header.length == 0) {
         return kNothing;
     }
-    std::vector<uint8_t> payload(header.length);
-    if (!receiveExactly(&payload[0], payload.size())) {
-        printf("[AASession] Failed to read payload bytes (%u bytes).\n", header.length);
+    wire.resize(header.length);
+    if (!receiveExactly(wire.data(), wire.size())) {
+        if (!sendBroken_) {
+            printf("[AASession] Failed to read payload bytes (%u bytes).\n", header.length);
+        }
         return kLost;
     }
     g_trail.stage = kTrailDecrypt;
-    std::vector<uint8_t> plain;
-    if (!header.encrypted()) {
-        plain.swap(payload);
-    } else if (!tls_.open(&payload[0], payload.size(), plain)) {
-        printf("[AASession] Failed to decrypt encrypted frame (%u bytes).\n", header.length);
-        assembler_.drop(channel);
-        return kNothing;
+    const bool encrypted = header.encrypted();
+    if (encrypted) {
+        if (!tls_.open(wire.data(), wire.size(), plain)) {
+            if (tls_.broken()) {
+                // No later frame can decrypt, and nothing more can be sealed: no ack, no ping, the session ends.
+                printf("[AASession] Encrypted frame on channel %u (%u bytes) broke TLS: session ends.\n", channel,
+                       header.length);
+                return kLost;
+            }
+            printf("[AASession] Failed to decrypt encrypted frame (%u bytes).\n", header.length);
+            assembler_.lose(header);
+            ackDropped(header);
+            if (++unreadableInARow_ >= kUnreadableLimit) {
+                printf(
+                    "[AASession] %u encrypted frames in a row did not decrypt: the stream is broken, session ends.\n",
+                    unreadableInARow_);
+                return kLost;
+            }
+            return kNothing;
+        }
+        unreadableInARow_ = 0;
     }
-    switch (assembler_.add(header, plain, message)) {
+    const MessageAssembler::Outcome outcome = assembler_.add(header, encrypted ? plain : wire, message);
+    switch (outcome) {
         case MessageAssembler::kComplete:
-            break;
         case MessageAssembler::kPending:
-            return kNothing;
+        case MessageAssembler::kRestOfLost:  // the rest of a message dropped and logged before
+            break;
         case MessageAssembler::kOverflow:
-            printf("[AASession] Reassembly overflow on channel %u: dropping fragments.\n", channel);
-            return kNothing;
+            printf("[AASession] Reassembly overflow on channel %u: dropping its message.\n", channel);
+            break;
         case MessageAssembler::kNoFirst:
-            printf("[AASession] LAST fragment on channel %u with no FIRST: dropping\n", channel);
-            return kNothing;
+            printf("[AASession] Continuation fragment on channel %u with no FIRST: dropping its message\n", channel);
+            break;
         case MessageAssembler::kShortOfSize:
             printf("[AASession] channel %u reassembled %u wire bytes, phone announced %u: dropping\n", channel,
                    assembler_.receivedBytes(), assembler_.announcedBytes());
-            return kNothing;
+            break;
+    }
+    if (outcome != MessageAssembler::kComplete) {
+        if (outcome != MessageAssembler::kPending) {
+            ackDropped(header);
+        }
+        return kNothing;
     }
     if (logged) {
         printHead(message);
@@ -457,6 +573,9 @@ void AASession::sendCarInput() {
         const bool sent = sendVideoFocus(projected, true);
         printf("[AASession] video focus -> phone: %s (unrequested) %s\n",
                projected ? "FOCUSED/projected" : "UNFOCUSED/native", sent ? "sent" : "SEND FAILED");
+    }
+    if (batch.keyframe) {
+        askKeyframe();
     }
     for (size_t i = 0; i < batch.keys.size(); ++i) {
         const CarKey& key = batch.keys[i];
@@ -527,10 +646,22 @@ bool AASession::sendSensorEvent(uint32_t type) {
 bool AASession::sendVideoFocus(bool projected, bool unrequested) {
     const bool sent = sendSealed(channel::kVideo, message::videoFocusIndication(projected, unrequested));
     if (sent) {
+        projected_ = projected;
         printf("[AASession] >>> Sent VideoFocusIndication (%s%s) on Channel %u!\n", projected ? "FOCUSED" : "UNFOCUSED",
                unrequested ? ", unrequested" : "", channel::kVideo);
     }
     return sent;
+}
+
+// A lost frame leaves the picture broken until the phone's next keyframe: the focus is taken away and given back at
+// once, which restarts the phone's encoder with one (keyframe_request.hpp). Only while the picture is projected.
+void AASession::askKeyframe() {
+    if (!videoReady_ || !projected_ || !keyframe_.allow(locationClockMs())) {
+        return;
+    }
+    const bool sent = sendVideoFocus(false, true) && sendVideoFocus(true, true);
+    printf("[AASession] video frame lost: keyframe asked of the phone (focus off and on) %s\n",
+           sent ? "sent" : "SEND FAILED");
 }
 
 }  // namespace aa

@@ -11,9 +11,13 @@
 // records 0-1, 2-6, 7-11), so records are joined by type and seq first. The data bytes of records 4 and on, record
 // headers left out, then form the touch stream:
 //     [0] flags and a rolling counter (top 2 bits: 00, 40, 80, c0)   [1] contact count N
-//     N contacts of 6 bytes: x hi, x lo, y hi, y lo, size, state << 4 | id
+//     N contacts of 6 bytes: x hi, x lo, y hi, y lo, size, then one byte: bits 6-7 another field, bits 4-5 the
+//     state, bits 0-3 the id
 // state 1 down, 2 move, 3 up; id a stable finger number; x and y in panel pixels (0..1279, 0..479). A second finger
-// straddles records 6 and 7. No allocation; tested in tests/test_evo_input.cpp.
+// straddles records 6 and 7. The last byte is split as iDrive splits it (CTouchDataClient::decodeTouchScreenPduData in
+// HmiMain3D: bits 6-7, 4-5 and 0-3 stored apart in its FingerData). The reference G20 leaves bits 6-7 at 0; on a
+// panel that sets them, reading bits 4-7 as the state dropped the contact, and a drag became a tap (F45, #30).
+// No allocation; tested in tests/test_evo_input.cpp.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -78,7 +82,7 @@ inline int parseTouchStream(const TouchMsg& m, TouchContact* out, int max, int* 
         contact.x = (at[0] << 8) | at[1];
         contact.y = (at[2] << 8) | at[3];
         contact.size = at[4];
-        contact.state = (at[5] >> 4) & 0x0F;
+        contact.state = (at[5] >> 4) & 0x03;  // bits 6-7 are another field (see above)
         contact.id = at[5] & 0x0F;
         if (contact.state >= 1 && contact.state <= 3 && contact.id < kTouchMaxContacts) {
             ++found;

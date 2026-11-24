@@ -9,7 +9,9 @@
 #include <string>
 #include <vector>
 
+#include "evo_log.hpp"
 #include "kombi_fake_kombi.hpp"
+#include "kombi_most.hpp"
 #include "kombi_nav.hpp"
 #include "kombi_test_util.hpp"
 
@@ -35,19 +37,21 @@ void touch(const std::string& path) {
     fclose(f);
 }
 
-// A temporary folder for the off and marker files, and the arrows' settings for the fake KOMBI.
+// A temporary folder for the setting and marker files, and the arrows' settings for the fake KOMBI.
 struct Place {
     char dir[64];
-    std::string off, marker;
+    std::string off, marker, single;
     Place() {
         snprintf(dir, sizeof(dir), "/tmp/kombi-navXXXXXX");
         CHECK(mkdtemp(dir));
         off = std::string(dir) + "/kombi-off";
         marker = std::string(dir) + "/kombi-nav.shown";
+        single = std::string(dir) + "/kombi-single-maneuver";
     }
     ~Place() {
         unlink(off.c_str());
         unlink(marker.c_str());
+        unlink(single.c_str());
         rmdir(dir);
     }
     ArrowsConfig config(uint16_t port) const {
@@ -56,6 +60,7 @@ struct Place {
         c.clusterPort = port;
         c.offFile = off;
         c.markerFile = marker;
+        c.singleFile = single;
         c.guide.approachMiles = 0;
         return c;
     }
@@ -68,6 +73,50 @@ void tell(Arrows& arrows, const Step& step, int64_t metres, const char* text, in
     Arrows::onNavStatus(kNavStatus, &status[0], status.size(), &arrows);
     Arrows::onNavStatus(kNavState, &state[0], state.size(), &arrows);
     Arrows::onNavStatus(kNavPosition, &position[0], position.size(), &arrows);
+}
+
+// The configured file selects both the graph and its log once, before start(), even if the file changes meanwhile.
+void routeModeSelectedOnce() {
+    for (int single = 0; single < 2; ++single) {
+        FakeKombi k;
+        Place p;
+        if (single) {
+            touch(p.single);
+        }
+        Arrows arrows(p.config(k.port()));
+        if (single) {
+            CHECK(unlink(p.single.c_str()) == 0);
+        } else {
+            touch(p.single);
+        }
+
+        FILE* log = tmpfile();
+        CHECK(log);
+        fflush(stdout);
+        const int saved = dup(STDOUT_FILENO);
+        CHECK(saved >= 0 && dup2(fileno(log), STDOUT_FILENO) >= 0);
+        arrows.start();
+        fflush(stdout);
+        CHECK(dup2(saved, STDOUT_FILENO) >= 0);
+        close(saved);
+        rewind(log);
+        std::string lines;
+        char line[1024];
+        while (fgets(line, sizeof(line), log)) {
+            lines += line;
+        }
+        fclose(log);
+        CHECK(lines.find(single ? "route graph: next maneuver only (14 requests)"
+                                : "route graph: whole captured route") != std::string::npos);
+        CHECK(lines.find(single ? "route graph: whole captured route" : "route graph: next maneuver only") ==
+              std::string::npos);
+
+        const size_t count = single ? 14 : 97;
+        tell(arrows, Step(7, "TEST ST"), 800, "0.5", kUnitMilesTenths);
+        CHECK(k.waitFor(count) && k.count() == count);
+        arrows.stop();
+        CHECK(k.count() == count + 6 && !exists(p.marker));
+    }
 }
 
 void endToEnd() {
@@ -167,12 +216,63 @@ void offUntilNextSession() {
     CHECK(k.count() == 1 + 6 + 97 + 6);
 }
 
+// The MOST cluster's side of the arrows: what reaches vmostd.
+class CountingPort : public evo::VmostPort {
+public:
+    CountingPort() : sent(0) {}
+    int send(evo::VmostMsgOut&) override {
+        ++sent;
+        return 0;
+    }
+    int shadow(uint8_t, uint8_t, bool) override { return 0; }
+    void pump(int) override {}
+    int sent;
+};
+
+// Ticks the MOST cluster's calls for about a second, as the controller reader would.
+int mostCalls(MostHud& most) {
+    CountingPort port;
+    for (int i = 0; i < 100; ++i) {
+        most.tick(evo::monoMs(), port);
+        usleep(10000);
+    }
+    return port.sent;
+}
+
+// The Ethernet KOMBI tells the MOST cluster it took an arrow: on a G-series car the MOST cluster stays alone, even with
+// the phone guiding.
+void mostAloneWithEthernet() {
+    FakeKombi k;
+    Place p;
+    MostHudConfig mc;
+    mc.markerFile = std::string(p.dir) + "/kombi-most.shown";
+    mc.offFile = p.off;
+    mc.ethernetFirstS = 0;
+    MostHud most(mc);
+    Arrows arrows(p.config(k.port()));
+    arrows.attachMost(&most);
+    arrows.start();
+    tell(arrows, Step(7, "TEST ST"), 800, "0.5", kUnitMilesTenths);
+    CHECK(k.waitFor(97));
+    const Bytes status = kombitest::status(1), state = kombitest::state(Step(7, "TEST ST")),
+                position = kombitest::position(800, "0.5", kUnitMilesTenths);
+    MostHud::onNavStatus(kNavStatus, &status[0], status.size(), &most);
+    MostHud::onNavStatus(kNavState, &state[0], state.size(), &most);
+    MostHud::onNavStatus(kNavPosition, &position[0], position.size(), &most);
+    CHECK(mostCalls(most) == 0 && most.phase() == MostHud::kIdle);
+    arrows.stop();
+}
+
 }  // namespace
 
 int main() {
+    routeModeSelectedOnce();
     endToEnd();
     bmwNavigationWins();
     offUntilNextSession();
-    puts("PASS kombi nav: menu setting, session end, exit, marker of a killed run, BMW navigation, refusal");
+    mostAloneWithEthernet();
+    puts(
+        "PASS kombi nav: route mode and log, menu setting, session end, exit, marker of a killed run, BMW navigation, "
+        "refusal, MOST cluster left alone by an Ethernet KOMBI");
     return 0;
 }

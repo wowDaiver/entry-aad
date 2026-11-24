@@ -157,13 +157,27 @@ int main(int argc, char** argv) {
     save(path, ring);
     p = reader.poll(now + 8250);
     assert(p.valid && !p.hasSpeed);  // impossible value: not sent
+    // Android Auto ignores every later speed of the session after one of 70 m/s: just under it goes, 70 does not, nor
+    // what rounds to 70000 mm/s on the wire.
+    assert(evo::gpsSpeedSendable(0) && evo::gpsSpeedSendable(69.999) && aa::locationScaled(69.999, 1000) == 69999);
+    assert(!evo::gpsSpeedSendable(69.9996) && !evo::gpsSpeedSendable(70) && !evo::gpsSpeedSendable(-0.1));
+    put32(ring, 0x4c + 28, 69999);
+    ring[0x4c + 0x30] = 5;
+    save(path, ring);
+    p = reader.poll(now + 8400);
+    assert(p.valid && p.hasSpeed && p.speedMps < evo::kGpsSpeedLimitMps && p.hasBearing);
+    put32(ring, 0x4c + 28, 70000);
+    ring[0x4c + 0x30] = 6;
+    save(path, ring);
+    p = reader.poll(now + 8550);
+    assert(p.valid && !p.hasSpeed && !p.hasBearing && p.hasAltitude);  // the position and altitude still go
     put32(ring, 0x4c + 28, 0);
     put32(ring, 0x4c + 20, 0);
     ring[0x4c + 44] = 0;
     ring[0x4c + 45] = 0;
     ring[0x4c] = 0;
     save(path, ring);
-    assert(!reader.poll(now + 8500).valid);  // explicit fix loss
+    assert(!reader.poll(now + 8700).valid);  // explicit fix loss
     put32(ring, 0, 64);
     save(path, ring);
     assert(!reader.poll(now + 9000).valid);
@@ -180,14 +194,22 @@ int main(int argc, char** argv) {
     save(path, ring);
     p = reader.poll(now + 11000);
     assert(p.valid && p.latitudeE6 == -33900000 && p.longitudeE6 == 151200000);
-    // This layout has no speed or course: both come from two fixes (0.0009 deg north in 1 s, about 100 m/s).
-    lat = -33.8991;
+    // This layout has no speed or course: both come from two fixes (0.0004 deg north in 1 s, about 44.5 m/s).
+    lat = -33.8996;
     put32(ring, 0x48, 103);
     memcpy(&ring[0x50], &lat, 8);
     save(path, ring);
     p = reader.poll(now + 12000);
-    assert(p.valid && p.hasSpeed && p.speedMps > 95 && p.speedMps < 105 && p.hasBearing &&
+    assert(p.valid && p.hasSpeed && p.speedMps > 44 && p.speedMps < 45 && p.hasBearing &&
            (p.bearingDeg < 1 || p.bearingDeg > 359));
+    // A fix seen late: 0.0003 deg (33 m) only 450 ms after the last poll, about 74 m/s. Past Android Auto's limit, the
+    // estimate gives neither speed nor course.
+    lat = -33.8993;
+    put32(ring, 0x48, 104);
+    memcpy(&ring[0x50], &lat, 8);
+    save(path, ring);
+    p = reader.poll(now + 12450);
+    assert(p.valid && !p.hasSpeed && !p.hasBearing);
     // This car's layout: the receiver's own speed and heading (TGNSSCourse after the position) win over any estimate.
     float realSpeed = 13.9f, realHeading = 87.5f, realAltitude = 231.5f;
     memcpy(&ring[0x70], &realSpeed, 4);
@@ -196,35 +218,41 @@ int main(int argc, char** argv) {
     put32(ring, 0x7c, 5);
     put32(ring, 0x48, 105);
     save(path, ring);
-    p = reader.poll(now + 12150);
+    p = reader.poll(now + 12600);
     assert(p.valid && p.hasSpeed && fabs(p.speedMps - 13.9) < 0.001 && p.hasBearing && p.bearingDeg == 87.5);
     assert(p.hasAltitude && p.altitudeM == 231.5);
     realSpeed = 0.2f;
     memcpy(&ring[0x70], &realSpeed, 4);
     put32(ring, 0x48, 106);
     save(path, ring);
-    p = reader.poll(now + 12300);
+    p = reader.poll(now + 12750);
     assert(p.valid && p.hasSpeed && !p.hasBearing);  // nearly stopped: no heading
+    realSpeed = 75.0f;                               // the receiver's own speed past the limit: left out as well
+    memcpy(&ring[0x70], &realSpeed, 4);
+    put32(ring, 0x48, 107);
+    save(path, ring);
+    p = reader.poll(now + 12900);
+    assert(p.valid && !p.hasSpeed && !p.hasBearing && p.hasAltitude);
     realSpeed = 13.9f;
     memcpy(&ring[0x70], &realSpeed, 4);
     put32(ring, 0x7c, 0);
-    put32(ring, 0x48, 107);
-    save(path, ring);
-    p = reader.poll(now + 12450);
-    assert(p.valid && !p.hasSpeed);  // flags off, fixes too close to estimate: no speed sent
     put32(ring, 0x48, 108);
+    save(path, ring);
+    p = reader.poll(now + 13050);
+    assert(p.valid && !p.hasSpeed);  // flags off, fixes too close to estimate: no speed sent
+    put32(ring, 0x48, 109);
     put32(ring, 0x64, 1);
     save(path, ring);
-    assert(!reader.poll(now + 12600).valid);  // latitude alone is insufficient
+    assert(!reader.poll(now + 13200).valid);  // latitude alone is insufficient
     char choice[96];                          // the gps-telephone file: the phone keeps its own GPS
     snprintf(choice, sizeof(choice), "/tmp/entry-gps-phone-%d", int(getpid()));
     evo::phoneGpsFilePath() = choice;
     save(choice, std::vector<uint8_t>());
-    assert(!reader.poll(now + 13000).valid && !evo::carGpsPresent());
+    assert(!reader.poll(now + 13500).valid && !evo::carGpsPresent());
     unlink(choice);
     unlink(path);
     assert(!reader.poll(now + 14000).valid && !evo::carGpsPresent());
     puts(
         "PASS GPS BMW: native internal/external rings, parked clock, cold cache, validity, expiry/recovery, signed AA "
-        "wire, subscription/rate, reset, phone GPS file");
+        "wire, subscription/rate, reset, phone GPS file, every speed sent under 70 m/s");
 }

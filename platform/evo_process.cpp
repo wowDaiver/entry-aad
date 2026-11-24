@@ -17,7 +17,7 @@ extern char** environ;
 
 namespace evo {
 bool runCommand(const std::string& executable, const std::vector<std::string>& args, std::string& output, int timeoutMs,
-                CommandReport* diagnostic) {
+                CommandReport* diagnostic, char* const* environment) {
     output.clear();
     if (diagnostic) {
         *diagnostic = CommandReport();
@@ -66,7 +66,9 @@ bool runCommand(const std::string& executable, const std::vector<std::string>& a
                       posix_spawn_file_actions_addclose(&actions, fds[0]) == 0 &&
                       posix_spawn_file_actions_addclose(&actions, fds[1]) == 0;
     pid_t pid = -1;
-    int rc = configured ? posix_spawnp(&pid, executable.c_str(), &actions, nullptr, &argv[0], environ) : EINVAL;
+    int rc = configured ? posix_spawnp(&pid, executable.c_str(), &actions, nullptr, &argv[0],
+                                       environment ? environment : environ)
+                        : EINVAL;
     posix_spawn_file_actions_destroy(&actions);
     close(fds[1]);
     if (rc != 0) {

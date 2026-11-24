@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Jiraiya43
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
-// The CDS handlers: car gear, phone calls, day/night and driving mode, to the service and the hold (car_signals.hpp).
+// The CDS handlers: car gear, park assist, phone calls, day/night, driving mode and the iDrive screen, to the service
+// and the hold (car_signals.hpp).
 #include "car_signals.hpp"
 
 #include <stdio.h>
@@ -9,7 +10,9 @@
 #include "../platform/service_contract.hpp"
 #include "app_log.hpp"
 #include "cds_parse.hpp"
+#include "idrive_coding.hpp"
 #include "mono_clock.hpp"
+#include "popup_peek.hpp"
 #include "service_link.hpp"
 
 namespace evo {
@@ -18,6 +21,10 @@ namespace app {
 namespace {
 
 const char* const kGearProperty = "driving.gear";
+// Park assist, published as '{"PDCStatus":<n>}' (1 = on). It also comes on with its button, without reverse.
+const char* const kPdcProperty = "sensors.PDCStatus";
+// The iDrive screen shown: '{"graphicalContext":{"visibleContext":<n>,...}}'.
+const char* const kScreenProperty = "hmi.graphicalContext";
 const char* const kCallProps[2] = {"communication.callStatus0", "communication.callStatus1"};
 // Car day/night and driving mode (CDS names present in this HU's libhmiremoting).
 const char* const kDayNightProperty = "vehicle.dayNightChangeOver";
@@ -40,10 +47,40 @@ bool onGearChanged(void*, const bmw::BasicString<unsigned short>& value) {
     if (gear != g_lastGear) {
         alog("CDS %s = '%s' -> gear %d", kGearProperty, text, gear);
         g_lastGear = gear;
-        g_hold->gearChanged(gear);
-        char msg[32];
-        snprintf(msg, sizeof(msg), "gear %d", gear);
-        sendToService(msg);
+        if (g_hold->gearChanged(gear, monoSeconds())) {
+            char msg[32];
+            snprintf(msg, sizeof(msg), "gear %d", gear);
+            sendToService(msg);
+        }
+    }
+    return true;
+}
+
+// ---- park assist -> hold machine (its view shows, Android Auto steps aside)
+// ------------------------------------------
+int g_lastPdc = kPdcUnknown;
+bool onPdcChanged(void*, const bmw::BasicString<unsigned short>& value) {
+    char text[160];
+    narrow(value, text, sizeof(text));
+    const int pdc = aa::cdsIntField(text, "PDCStatus", -1);
+    if (pdc != g_lastPdc) {
+        alog("CDS %s = '%s' -> park assist %d", kPdcProperty, text, pdc);
+        g_lastPdc = pdc;
+        g_hold->pdcChanged(pdc);
+    }
+    return true;
+}
+
+// ---- the iDrive screen shown: logged, nothing decided on it yet -----------------------------------------------------
+// Which numbers the camera and panorama views have on this head unit is not known: the log tells, screen by screen.
+int g_lastScreen = -1000;
+bool onScreenChanged(void*, const bmw::BasicString<unsigned short>& value) {
+    char text[240];
+    narrow(value, text, sizeof(text));
+    const int screen = aa::cdsIntField(text, "visibleContext", -1);
+    if (screen != g_lastScreen) {
+        g_lastScreen = screen;
+        alog("CDS %s = '%s'", kScreenProperty, text);
     }
     return true;
 }
@@ -116,6 +153,13 @@ bool onDriveMode(int prop, const bmw::BasicString<unsigned short>& value) {
     if (!change) {
         return true;
     }
+    // With iDrive's driving mode popup turned off, nothing comes to show: Android Auto stays, and should a popup
+    // still open, the ordinary popup peek steps aside for it.
+    const DriveModePopup popup = readDriveModePopup();
+    if (!driveModePopupExpected(popup.setting, popup.forced)) {
+        alog("drive mode change: iDrive's driving mode popup is off, Android Auto stays on screen");
+        return true;
+    }
     char msg[32];
     snprintf(msg, sizeof(msg), "drivemode %d", v);
     sendToService(msg);
@@ -136,6 +180,10 @@ void subscribeCarSignals(bmw::PluginApp* app, HoldMachine& hold) {
     g_hold = &hold;
     addCdsHandler(app, kGearProperty, &onGearChanged);
     alog("CDS handler for %s registered", kGearProperty);
+    addCdsHandler(app, kPdcProperty, &onPdcChanged);
+    alog("CDS handler for %s registered", kPdcProperty);
+    addCdsHandler(app, kScreenProperty, &onScreenChanged);
+    alog("CDS handler for %s registered", kScreenProperty);
     for (int i = 0; i < 2; ++i) {
         addCdsHandler(app, kCallProps[i], i == 0 ? &onCallStatus0 : &onCallStatus1);
         alog("CDS handler for %s registered", kCallProps[i]);

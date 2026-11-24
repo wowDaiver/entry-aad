@@ -385,6 +385,58 @@ void someipFraming() {
     CHECK(!isAllowedMethod(0x0001) && !isAllowedMethod(0x0005) && !isAllowedMethod(0x000D) && !isAllowedMethod(0x0011));
 }
 
+void singleManeuverGraph() {
+    // Regression for G01 146: session 18 of the old graph created road 1 / text 2
+    // and received 0x26. Keep a closed graph for the AA maneuver, not template roads.
+    RouteGraph g(0xC8, 255, true);
+    std::vector<Request> start, update, distance;
+    CHECK(g.routeStart(ClusterManeuver(6, "FIRST", "250", kClusterMetres), start));
+    CHECK(start.size() == 14);
+    int texts = 0, roads = 0, descriptions = 0;
+    Bytes initialDistance;
+    for (size_t i = 0; i < start.size(); ++i) {
+        const Request& r = start[i];
+        CHECK(indexOf(r) == 0);  // every model and text resource belongs to maneuver 0
+        if (r.method == 0x0003) {
+            CHECK(textIn(r.body) == "FIRST");
+            ++texts;
+        } else if (r.method == 0x000E) {
+            CHECK(readBE32(&r.body[4]) == 0x27000000);
+            CHECK(readBE32(&r.body[32]) == 0x03000000);
+            ++roads;
+        } else if (is(r, 0x000A, 15, 0)) {
+            CHECK(r.body[33] == kLeft);
+            ++descriptions;
+        } else if (is(r, 0x000A, 29, 0)) {
+            initialDistance = r.body;
+        }
+    }
+    CHECK(texts == 1 && roads == 1 && descriptions == 1 && !initialDistance.empty());
+    CHECK(start.back().method == 0x0009 && start.back().body[30] == 2);
+    CHECK(g.distanceUpdate("200", kClusterMetres, distance) && distance.size() == 1);
+    CHECK(!memcmp(&initialDistance[23], &distance[0].body[23], 8));
+    CHECK(textIn(distance[0].body) == "200");
+    CHECK(g.maneuverUpdate(ClusterManeuver(7, "NEXT", "100", kClusterMetres), true, update));
+    CHECK(update.size() == 8);
+    for (size_t i = 0; i < update.size(); ++i) {
+        CHECK(indexOf(update[i]) == 0);
+        if (update[i].method == 0x0003) {
+            CHECK(textIn(update[i].body) == "NEXT");
+        }
+        if (is(update[i], 0x000A, 15, 0)) {
+            CHECK(update[i].body[33] == kRight);
+        }
+    }
+    ClusterLanes lanes;
+    lanes.push_back(ClusterLane(1, 1));
+    LaneSection section;
+    CHECK(g.routeStart(ClusterManeuver(6, "LANES", "50", kClusterMetres, lanes), start, &section));
+    CHECK(start.size() == 15 && section.span > 0);
+    for (size_t i = 0; i < start.size(); ++i) {
+        CHECK(indexOf(start[i]) == 0);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -397,6 +449,7 @@ int main() {
     lanes();
     noImages();
     someipFraming();
+    singleManeuverGraph();
     puts("PASS kombi graph: route start, update block, distance, lanes and positions as on the car, SOME/IP framing");
     return 0;
 }

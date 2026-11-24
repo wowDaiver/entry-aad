@@ -21,14 +21,22 @@ const int kBacklog = 5;
 const unsigned kFailuresBeforeRelisten = 3;
 const int kRelistenAttempts = 5;
 const uint32_t kSubnetMask = 0xffffff00u;  // the hotspot's /24
+// The car's own CarPlay marks its screen stream this way (Apple's SocketSetQoS in Cinemo's libNmeCarPlay.so). The
+// kernel turns it into the Wi-Fi video category (WMM AC_VI, 802.1d priority 4), which gets on the air before best
+// effort. Everything the car sends on this connection goes that way: video acks, input, TCP acks of the phone's video.
+const int kWifiVideoTos = 0x80;
 
-void setOption(int fd, int level, int name, int value) {
-    setsockopt(fd, level, name, &value, sizeof(value));
+bool setOption(int fd, int level, int name, int value) {
+    return setsockopt(fd, level, name, &value, sizeof(value)) == 0;
 }
 
-// Small frames (acks, input) must not wait for Nagle or delayed acks; a phone gone from Wi-Fi must end in an error
-// rather than an endless recv(): keepalive after 10 s idle, 3 probes 3 s apart.
+// Small frames (acks, input) must not wait for Nagle or delayed acks, nor queue behind ordinary traffic on the Wi-Fi;
+// a phone gone from Wi-Fi must end in an error rather than an endless recv(): keepalive after 10 s idle, 3 probes 3 s
+// apart.
 void tune(int fd) {
+    if (!setOption(fd, IPPROTO_IP, IP_TOS, kWifiVideoTos)) {
+        printf("[TcpServer] could not give the connection the Wi-Fi video priority: %s\n", strerror(errno));
+    }
     setOption(fd, IPPROTO_TCP, TCP_NODELAY, 1);
     setOption(fd, SOL_SOCKET, SO_KEEPALIVE, 1);
 #ifdef TCP_KEEPIDLE

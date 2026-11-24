@@ -124,6 +124,11 @@ bool AASession::onControl(uint16_t id, const Message& message) {
         case msg::kPingRequest:
             onPing(message);
             break;
+        case msg::kPingResponse:  // to our own ping: like any data, it already reset the silence
+            if (pingAnswers_++ < kPingsLogged || pingAnswers_ % kPingsLogEvery == 0) {
+                printf("[AASession] >>> PingResponse %u to ours\n", pingAnswers_);
+            }
+            break;
         default:
             printf("[AASession] Control Message RX: ID=0x%04X, Len=%u\n", id, static_cast<unsigned>(message.size()));
             break;
@@ -169,7 +174,8 @@ void AASession::onTlsHandshake(const Message& message) {
 void AASession::onDiscovery() {
     printf("[AASession] >>> Received ServiceDiscoveryRequest from phone! Sending ServiceDiscoveryResponse...\n");
     const Message response = message::discoveryResponse(
-        buildCarServiceDiscovery(kDhuSdpProtobuf, kDhuSdpProtobufLen, vehicleFile_, softwareVersion_));
+        buildCarServiceDiscovery(kDhuSdpProtobuf, kDhuSdpProtobufLen, vehicleFile_, softwareVersion_, display_,
+                                 carMake_, codedSide_, codedModel_));
     if (sendSealed(channel::kControl, response)) {
         printf("[AASession] >>> Sent ServiceDiscoveryResponse (%u bytes)\n", static_cast<unsigned>(response.size()));
     }
@@ -198,6 +204,7 @@ void AASession::onNavigationFocus(const Message& message) {
 // close, the phone was seen sending ByeBye right after the discovery and reconnecting every 3 s.
 void AASession::onByeBye(const Message& message) {
     const uint32_t reason = bodyField(message, 1);
+    goodbye_.store(true);  // before the session ends: the ended callback reads it
     const bool sent = sendSealed(channel::kControl, message::byeByeResponse());
     printf("[AASession] >>> ByeByeRequest (reason=%d%s, %u media messages): ByeByeResponse %s, ending the session\n",
            signedOrMinusOne(reason), reason == 1 ? " = quit" : "", mediaMessages_, sent ? "sent" : "SEND FAILED");
@@ -248,6 +255,7 @@ void AASession::onSetup(uint8_t channel) {
     if (channel == channel::kVideo) {
         sendVideoFocus(true, false);
         videoReady_ = true;
+        keyframe_.videoStarted(locationClockMs());
     }
 }
 
@@ -263,7 +271,9 @@ void AASession::onStart(uint8_t channel, const Message& message) {
            session == kNoField ? 0u : session);
 }
 
-// Media of any channel: counted, video handed to the callbacks, everything acked except cut-short video.
+// Media of any channel: counted, video handed to the callbacks, everything acked. The phone counts each media message
+// it sends against its window of kMaxUnacked until acked, whether the head unit could use it or not: video cut too
+// short to hold a picture is acked too, or it would hold a slot of that window for the rest of the session.
 void AASession::onMedia(uint8_t channel, uint16_t id, const Message& message) {
     ++mediaMessages_;
     if (mediaMessages_ % kMediaLogEvery == 1) {
@@ -286,25 +296,39 @@ void AASession::onMedia(uint8_t channel, uint16_t id, const Message& message) {
         // Cut at the protocol's offsets, never by scanning: a timestamp can hold 00 00 01 and look like a start code.
         const size_t offset = id == msg::kMediaConfig ? kMessageIdSize : kTimestampedHeader;
         if (message.size() <= offset) {
+            // Too short to carry any picture: no callback, but acked below like every other media message.
             printf("[AASession] Dropping truncated/empty video message 0x%04X (%u bytes).\n", id,
                    static_cast<unsigned>(message.size()));
-            return;
-        }
-        const uint8_t* data = &message[offset];
-        const size_t size = message.size() - offset;
-        if (id == msg::kMediaConfig) {
-            printf("[AASession] >>> Received H.264 SPS/PPS codec config (%u bytes)!\n", static_cast<unsigned>(size));
+        } else if (id == msg::kMediaConfig) {
+            const size_t configBytes = message.size() - offset;
+            printf("[AASession] >>> Received H.264 SPS/PPS codec config (%u bytes)!\n",
+                   static_cast<unsigned>(configBytes));
             if (codec_.fn) {
-                codec_.fn(data, size, codec_.user);
+                codec_.fn(&message[offset], configBytes, codec_.user);
             }
         } else if (video_.fn) {
             // The callback owns the decoder feed, SPS/PPS before the next IDR included.
             g_trail.stage = kTrailVideo;
-            video_.fn(mediaMessages_, data, size, bigEndian64(&message[kMessageIdSize]), video_.user);
+            video_.fn(mediaMessages_, &message[offset], message.size() - offset, bigEndian64(&message[kMessageIdSize]),
+                      video_.user);
             g_trail.stage = kTrailHandler;
         }
     }
     sendSealed(channel, message::mediaAck(mediaSessions_[channel & 31]));
+}
+
+// A message the phone sent on one of its streams, but lost on the way (a fragment that did not decrypt, a reassembly
+// that failed): acked once, as onMedia acks those it gets, so that the phone's window does not shrink by one for good;
+// ten such losses would stop the stream. The ack goes with the LAST fragment, which closes the message and keeps its
+// position in the clear header even when it does not decrypt. On these streams the phone fragments only media: its
+// other messages there are a few bytes. A whole frame that did not decrypt is not acked: it may have been one of them.
+void AASession::ackDropped(const FrameHeader& header) {
+    if (header.position() != frame::kLast || !channel::isMediaSink(header.channel)) {
+        return;
+    }
+    const bool sent = sendSealed(header.channel, message::mediaAck(mediaSessions_[header.channel & 31]));
+    printf("[AASession] media message lost on the way, acked on channel %u %s\n", header.channel,
+           sent ? "sent" : "SEND FAILED");
 }
 
 // The phone's "exit to car" icon asks for the native screen; the same answer is given and the callback hides the

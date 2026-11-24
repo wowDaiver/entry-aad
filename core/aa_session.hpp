@@ -8,12 +8,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <atomic>
+
 #include "aa_frame.hpp"
 #include "aa_input.hpp"
 #include "aa_messages.hpp"
 #include "aa_tls.hpp"
 #include "car_inbox.hpp"
 #include "car_location.hpp"
+#include "display_plan.hpp"
+#include "keyframe_request.hpp"
+#include "sdr_builder.hpp"
 
 namespace aa {
 
@@ -42,6 +47,16 @@ public:
     // Ends the session and joins its thread. The ended callback does not run.
     void stop();
     bool isActive() const { return running(); }
+    // The longest time the phone sent nothing since the previous call, in milliseconds, and starts over. Any thread.
+    // After 2 s of silence the head unit pings the phone, which answers at once: seconds here are a link that stalled.
+    uint32_t takeLongestSilenceMs() { return longestSilenceMs_.exchange(0); }
+    // The phone ended this session with ByeBye (the user left Android Auto), rather than going silent or breaking the
+    // connection. Read by the ended callback; reset by start().
+    bool phoneSaidGoodbye() const { return goodbye_.load(); }
+    // The car gives the session up, as when the phone is gone (its video decoder stalled). From a callback on the
+    // session thread only: the session ends once that callback returns, its ended callback runs, and
+    // phoneSaidGoodbye() stays false.
+    void giveUp() { givenUp_ = true; }
 
     // Set before start().
     void setDisconnectCallback(SessionEndedCallback cb, void* user_data = nullptr);
@@ -51,12 +66,21 @@ public:
     void setMicRequestCallback(MicRequestCallback cb, void* user_data = nullptr);
     void setNavStatusCallback(NavStatusCallback cb, void* user_data = nullptr);
     void setTouchForwarding(bool on) { inbox_.setTouchForwarding(on); }  // on by default; keys go either way
-    // The file holding the car's model and year (SdrIdentity::loadVehicleFile), read at each service discovery; kept
-    // as given, so it must outlive the session. None by default: the default model and year.
+    // The file holding the car's model, year, side and fuel (SdrIdentity::loadVehicleFile), read at each service
+    // discovery; kept as given, so it must outlive the session. None by default: the default car.
     void setVehicleFile(const char* path) { vehicleFile_ = path; }
     // The program's version, announced to the phone as the head unit's software version; kept as given. None by
     // default: "0.0.0".
     void setSoftwareVersion(const char* version) { softwareVersion_ = version; }
+    // The panel and the canvas asked of the phone for it (display_plan.hpp). The reference car's by default.
+    void setDisplay(const DisplayPlan& display) { display_ = display; }
+    // The maker announced to the phone, as iDrive is coded ("MINI"); kept by the caller. Null: "BMW".
+    void setCarMake(const char* make) { carMake_ = make; }
+    // The driver's side as the car is coded; the vehicle file's "side=" still wins. Left by default.
+    void setCodedDriverSide(DriverPosition side) { codedSide_ = side; }
+    // The model as the car is coded (its series, "G20"); kept by the caller. The vehicle file's "model=" still wins.
+    // Null: "iDrive".
+    void setCodedModel(const char* model) { codedModel_ = model; }
 
     // Car input for the phone, from any thread: queued, then sent by the session thread.
     void postTouchEvent(const TouchEventOut& ev);
@@ -64,6 +88,8 @@ public:
     void postRelativeEvent(uint32_t keycode, int delta);  // rotary steps (keycode 65536, ROTARY_CONTROLLER)
     // The car takes (false) or gives back (true) the screen: an unrequested video focus indication.
     void postVideoFocus(bool projected);
+    // The decoder lost a video frame. Any thread; the session asks the phone for a keyframe when it may.
+    void postKeyframeRequest();
     // The car's day or night, kept across sessions: a NIGHT_MODE event once the phone started that sensor.
     void postNightMode(bool night);
     // The car's latest fix (monotonic capture time); an invalid one when the car's feed expired.
@@ -98,13 +124,15 @@ private:
     bool sendFrame(uint8_t channel, uint8_t flags, const uint8_t* payload, size_t size);
     bool sendPlain(uint8_t channel, const Message& message);
     bool sendSealed(uint8_t channel, const Message& message, uint8_t flags = frame::kSealed);
-    Received receive(uint8_t& channel, Message& message);
+    bool askPhone(uint64_t silentMs);  // our own ping to a silent phone; false: not possible yet
+    Received receive(uint8_t& channel, Message& wire, Message& plain, Message& message);
 
     // Car input (aa_session.cpp).
     void sendCarInput();
     bool sendLocation();
     bool sendSensorEvent(uint32_t type);
     bool sendVideoFocus(bool projected, bool unrequested);
+    void askKeyframe();
 
     // One handler per route (aa_channels.cpp); dispatch() is false when the session must end.
     bool dispatch(uint8_t channel, const Message& message);
@@ -121,6 +149,7 @@ private:
     void onSetup(uint8_t channel);
     void onStart(uint8_t channel, const Message& message);
     void onMedia(uint8_t channel, uint16_t id, const Message& message);
+    void ackDropped(const FrameHeader& header);  // a frame dropped or skipped: the media message it closes
     void onVideoFocusRequest(uint8_t channel, const Message& message);
     void onInputBinding(uint8_t channel);
     void onMicrophoneOpen(uint8_t channel, const Message& message);
@@ -141,12 +170,24 @@ private:
     Callback<NavStatusCallback> navigation_;
     const char* vehicleFile_;
     const char* softwareVersion_;
+    const char* carMake_;
+    DriverPosition codedSide_;
+    const char* codedModel_;
+    DisplayPlan display_;
 
     CarInbox inbox_;
+    std::atomic<uint32_t> longestSilenceMs_;
+    std::atomic<bool> goodbye_;  // set on the session thread, read by the ended callback
     // Session thread only.
+    uint64_t lastReceivedMs_;  // when the phone last sent anything, 0 before its first byte
+    bool givenUp_;             // giveUp() was called
     TlsClient tls_;
     MessageAssembler assembler_;
-    bool videoReady_;             // the phone set the video channel up: a focus can go
+    bool videoReady_;  // the phone set the video channel up: a focus can go
+    bool projected_;   // the last video focus sent was FOCUSED
+    KeyframeRequest keyframe_;
+    unsigned unreadableInARow_;   // encrypted frames that did not decrypt since the last one that did
+    bool sendBroken_;             // a send failed: nothing more goes out, the session ends (sendExactly)
     uint32_t mediaSessions_[32];  // per channel, the session id of its start indication, echoed in our acks
     uint32_t mediaMessages_;      // media messages received, every channel
     uint32_t audioMessages_[2];   // guidance (8), media (9)
@@ -154,6 +195,7 @@ private:
     // Log throttles, per session.
     unsigned framesSeen_[256];
     unsigned keysLogged_, movesLogged_, navigationLogged_, pings_;
+    unsigned pingsAsked_, pingAnswers_;  // our own pings, and the phone's answers to them
     uint32_t playbackState_;
 };
 

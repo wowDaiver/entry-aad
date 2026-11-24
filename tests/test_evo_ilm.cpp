@@ -203,6 +203,8 @@ int main(int argc, char** argv) {
     CHECK(!ilm.validateTarget(0x7eaa0001, 0x3000, 1280, 480));   // absent from screen order
     CHECK(!ilm.validateTarget(0x7eaa0001, 0x80000000, 800, 480));
     CHECK(ilm.surfaceAbsent(0x7eaa0001) && !ilm.surfaceAbsent(0));
+    uint32_t panelW = 0, panelH = 0;  // the panel's size, as the service and the supervisor read it
+    CHECK(ilm.screenSize(panelW, panelH) && panelW == 1280 && panelH == 480);
     setenv("EVO_TEST_TRUNCATED_SCENE", "1", 1);
     CHECK(!ilm.validateTarget(0x7eaa0001, 0x80000000, 1280, 480) && !ilm.surfaceAbsent(0x7eaa0001));
     unsetenv("EVO_TEST_TRUNCATED_SCENE");

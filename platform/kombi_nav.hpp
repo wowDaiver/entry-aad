@@ -14,6 +14,8 @@
 //   - The BMW navigation wins: while it guides (the probe given to start(), a read-only D-Bus getter), the arrows stop
 //     writing without a cancel, and come back when it ends.
 //   - The marker file says an arrow may be up; it survives a SIGKILL, and the next start sends the cancel again.
+//   - The F-series cluster over MOST (kombi_most.hpp), once attached, is told when the Ethernet KOMBI took an arrow
+//     (it then stays alone) and whether the BMW navigation guides.
 #ifndef ENTRY_AAD_PLATFORM_KOMBI_NAV_HPP
 #define ENTRY_AAD_PLATFORM_KOMBI_NAV_HPP
 
@@ -38,9 +40,12 @@ struct ArrowsConfig {
     uint32_t handle;             // the guidance instance, 0xC8 on every boot seen
     std::string offFile;         // present: the arrows are off
     std::string markerFile;      // present: an arrow may be up
+    std::string singleFile;      // present at construction: only the next maneuver's graph
     GuideSettings guide;
     ArrowsConfig();
 };
+
+class MostHud;
 
 class Arrows {
 public:
@@ -50,6 +55,8 @@ public:
     explicit Arrows(const ArrowsConfig& config = ArrowsConfig());
     ~Arrows();
 
+    // The MOST cluster of the F-series cars, told what concerns it; before start().
+    void attachMost(MostHud* most) { most_ = most; }
     // Starts the worker, idle while the setting is off. probe: null never gives way. Once, from main().
     void start(BmwProbe probe = nullptr);
     // Stops the threads and clears the arrow, one quick attempt. Safe to call twice.
@@ -85,6 +92,7 @@ private:
     void markArrow(bool up, bool force = false);
 
     const ArrowsConfig config_;
+    const bool singleManeuver_;
     RouteGraph graph_;
     ClusterLink link_;
     Output output_;
@@ -108,6 +116,7 @@ private:
     double retryAt_;
     int linkFailures_;
     bool marked_;
+    MostHud* most_;
 
     // The BMW navigation watch, under watchMu_
     pthread_mutex_t watchMu_;

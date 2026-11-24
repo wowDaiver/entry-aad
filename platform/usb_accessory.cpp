@@ -29,7 +29,8 @@ const uint8_t kStart = 53;
 const unsigned kRequestMs = 500;
 // What makes the phone open Android Auto (manufacturer and model), then what it shows about the accessory.
 const char* const kIdentity[] = {
-    "Android", "Android Auto", "Android Auto", "2.0.1", "https://github.com/Jiraiya43/entry-aad", "entry-aad",
+    "Android",   "Android Auto", "Android Auto", "2.0.1", "https://github.com/Jiraiya43/EntryNav2-Android-Auto",
+    "entry-aad",
 };
 
 // A small sysfs attribute as a number; false when missing or not one.

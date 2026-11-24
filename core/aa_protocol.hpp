@@ -26,6 +26,10 @@ const uint8_t kMicrophone = 14;
 inline bool isAudioSink(unsigned ch) {
     return ch == kGuidanceAudio || ch == kMediaAudio;
 }
+// The streams the phone sends the car, where it holds at most kMaxUnacked media messages without an ack.
+inline bool isMediaSink(unsigned ch) {
+    return ch == kVideo || isAudioSink(ch);
+}
 inline bool isInput(unsigned ch) {
     return ch == kInputDisplay2 || ch == kInputDisplay1 || ch == kInput;
 }

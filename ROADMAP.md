@@ -25,21 +25,25 @@ Un point n'est coché qu'avec une preuve en voiture : un test sur PC ne suffit p
 - [ ] Trajet de 20 à 30 minutes par câble, musique en Bluetooth
 - [ ] Câble débranché puis rebranché en cours de route
 - [ ] *Arrêter* puis *Démarrer* sans débrancher, puis retour au sans-fil
-- [ ] Câble essayé sur une autre voiture
+- [x] Câble essayé sur une autre voiture : X3 G01 ([#17](https://github.com/Jiraiya43/EntryNav2-Android-Auto/issues/17)),
+  i3 ([#19](https://github.com/Jiraiya43/EntryNav2-Android-Auto/issues/19)), G21
+  ([#26](https://github.com/Jiraiya43/EntryNav2-Android-Auto/issues/26))
 
 ## 1.0 : une autre voiture
 
 - [x] Rapport de compatibilité d'une deuxième voiture, sans rien installer : X3 G01 de 2020
-  ([#17](https://github.com/Jiraiya43/entry-aad/issues/17))
+  ([#17](https://github.com/Jiraiya43/EntryNav2-Android-Auto/issues/17))
 - [ ] Première installation sur une autre voiture, puis désinstallation vérifiée
 - [ ] Tableau des logiciels essayés rempli ([compatibilité](docs/COMPATIBILITE.md))
-- [ ] Ancienne molette (contrôleurs C10/C20) essayée sur une vraie voiture
+- [ ] Mise à jour par clé USB essayée sur la voiture de référence : version plus récente, version antérieure, clé
+  sans archive, archive non signée ([installation](docs/INSTALLATION.md#par-clé-usb-sans-pc))
+- [x] Ancienne molette (contrôleurs C10/C20) essayée sur une vraie voiture : i3
+  ([#19](https://github.com/Jiraiya43/EntryNav2-Android-Auto/issues/19), 11 novembre 2026)
 
 ## Limites connues
 
 | Limite | Cause | Piste |
 |---|---|---|
-| La touche MAP ouvre la carte BMW, pas la navigation d'Android Auto | choix actuel : MAP rend l'écran à l'iDrive | à décider |
 | Le son passe par le Bluetooth de la voiture : qualité limitée, débuts de messages vocaux coupés | pas de son par le Wi-Fi | son par le Wi-Fi |
 | Aide au stationnement ouverte sans marche arrière : Android Auto reste en retrait jusqu'à « Ouvrir » | l'écran affiché par l'iDrive n'est pas connu | lire l'état du PDC |
 | Pendant un appel, la molette agit aussi sur l'écran d'appel de l'iDrive | idem | lire l'écran affiché par l'iDrive |
@@ -56,7 +60,7 @@ Un point n'est coché qu'avec une preuve en voiture : un test sur PC ne suffit p
 | Boussole envoyée au téléphone (carte orientée à l'arrêt) | idée |
 | Touche favori du tableau de bord qui ouvre Android Auto | idée |
 | Pochette de l'album sur l'iDrive | idée |
-| Autres tailles d'écran | il manque le rapport d'une voiture concernée |
+| Autres tailles d'écran | taille lue sur la voiture ; à l'essai sur un i3 en 800x480 ([#19](https://github.com/Jiraiya43/EntryNav2-Android-Auto/issues/19)) |
 | Autre structure de la bibliothèque Bluetooth | refusée pour l'instant, il manque le rapport et la bibliothèque |
 | Message à l'écran si Android Auto ne démarre pas en production | idée |
 | Mise à jour sans refaire tout le parcours | idée |

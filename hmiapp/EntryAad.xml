@@ -11,6 +11,9 @@
       <raAction id="22"/>
       <raAction id="24"/>
       <raAction id="26"/>
+      <raAction id="27"/>
+      <raAction id="28"/>
+      <raAction id="29"/>
       <hmiAction id="25" target="12"/>
     </actions>
     <models>
@@ -35,6 +38,16 @@
       <textIdModel id="39" textId="17">
         <synonyms/>
       </textIdModel>
+      <raBoolModel id="33"/>
+      <textIdModel id="41" textId="18">
+        <synonyms/>
+      </textIdModel>
+      <textIdModel id="42" textId="40">
+        <synonyms/>
+      </textIdModel>
+      <textIdModel id="43" textId="46">
+        <synonyms/>
+      </textIdModel>
       <textIdModel id="35" textId="15">
         <synonyms/>
       </textIdModel>
@@ -56,7 +69,10 @@
       <textIdModel id="84" textId="24">
         <synonyms/>
       </textIdModel>
-      <textIdModel id="85" textId="25">
+      <textIdModel id="86" textId="26">
+        <synonyms/>
+      </textIdModel>
+      <textIdModel id="87" textId="27">
         <synonyms/>
       </textIdModel>
       <raIntModel id="40" modelType="NativeStateID" value="1"/>
@@ -65,6 +81,7 @@
       <focusEvent id="50" targetModel="40"/>
       <focusEvent id="51" target="10"/>
       <focusEvent id="52" target="13"/>
+      <popupEvent id="53" target="14" priority="10"/>
     </events>
     <hmiStates>
       <hmiState id="10" text="Android Auto" textModel="3">
@@ -74,19 +91,21 @@
           <separator id="66"/>
           <checkbox action="24" id="64" model="34" text="Demarrage automatique" textModel="35"/>
           <checkbox action="26" id="68" model="38" text="Cable USB au lieu du sans-fil" textModel="39"/>
+          <checkbox action="27" id="69" model="33" text="Garder les journaux" textModel="41"/>
+          <button action="28" id="63" model="42" text="Copier les journaux sur cle USB"/>
+          <button action="29" id="60" model="43" text="Mettre a jour par cle USB"/>
           <separator id="67"/>
           <button action="25" id="65" model="36" text="Aide"/>
         </components>
       </hmiState>
-      <hmiState id="12" parentId="10" text="Aide" textModel="36">
+      <hmiState id="12" parentId="10" text="Aide" textModel="87">
         <components>
+          <label id="99" model="86"/>
           <label id="90" model="80"/>
           <label id="91" model="81"/>
           <label id="92" model="82"/>
           <label id="93" model="83"/>
-          <separator id="95"/>
           <label id="94" model="84"/>
-          <label id="96" model="85"/>
         </components>
       </hmiState>
       <hmiState id="13" parentId="10" text=" " textModel="37">
@@ -116,6 +135,11 @@
           </image>
         </components>
       </hmiState>
+      <popupHmiState id="14" text=" " textModel="37">
+        <components>
+          <label id="97" model="37"/>
+        </components>
+      </popupHmiState>
     </hmiStates>
   </pluginApp>
 </pluginApps>

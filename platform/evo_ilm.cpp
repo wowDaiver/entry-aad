@@ -354,6 +354,16 @@ bool EvoIlm::validateTarget(uint32_t surface, uint32_t layer, uint32_t w, uint32
     bool present = std::find(ids.begin(), ids.end(), surface) != ids.end();
     return requireFree ? !present : present;
 }
+bool EvoIlm::screenSize(uint32_t& w, uint32_t& h) {
+    int sw = 0, sh = 0;
+    if (!parseResolution(get("screen", 0), sw, sh) || sw <= 0 || sh <= 0) {
+        return false;
+    }
+    w = static_cast<uint32_t>(sw);
+    h = static_cast<uint32_t>(sh);
+    return true;
+}
+
 bool EvoIlm::surfaceAbsent(uint32_t surface) {
     std::vector<std::string> args;
     args.push_back("get");

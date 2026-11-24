@@ -86,7 +86,7 @@ evo::WifiStation station(uint32_t frames, uint32_t retries, uint32_t failed, uin
 void stationMessages() {
     const evo::WifiStation s = station(5000, 300, 2, 125);
     CHECK(!memcmp(s.mac, kPhone, sizeof(kPhone)));
-    CHECK(s.signalDbm == -52 && s.signalAvgDbm == -51 && s.txRate == 1500 && s.rxRate == 1350);
+    CHECK(s.signalDbm == -52 && s.signalAvgDbm == -51 && s.rxRate == 1350);
     CHECK(s.txFrames == 5000 && s.txRetries == 300 && s.txFailed == 2 && s.connectedS == 125);
 
     // A driver that gives little: what is missing stays "no figure".
@@ -98,8 +98,18 @@ void stationMessages() {
     bare.nested(NL80211_ATTR_STA_INFO, info);
     evo::WifiStation little;
     CHECK(evo::parseWifiStation(&bare.bytes[0], bare.bytes.size(), little));
-    CHECK(little.signalDbm == -70 && little.signalAvgDbm == evo::kNoFigure && little.txRate == evo::kNoFigure &&
+    CHECK(little.signalDbm == -70 && little.signalAvgDbm == evo::kNoFigure && little.rxRate == evo::kNoFigure &&
           little.txFrames == evo::kNoFigure && little.connectedS == evo::kNoFigure);
+
+    // A level of 0 dBm is the WL18xx's "not measured" (seen in every car log): no figure.
+    Attrs zero;
+    Attrs zeroInfo;
+    zeroInfo.u8(NL80211_STA_INFO_SIGNAL, 0);
+    zeroInfo.u8(NL80211_STA_INFO_SIGNAL_AVG, static_cast<uint8_t>(-68));
+    zero.put(NL80211_ATTR_MAC, kPhone, sizeof(kPhone));
+    zero.nested(NL80211_ATTR_STA_INFO, zeroInfo);
+    CHECK(evo::parseWifiStation(&zero.bytes[0], zero.bytes.size(), little));
+    CHECK(little.signalDbm == evo::kNoFigure && little.signalAvgDbm == -68);
 
     // No station address: not a station.
     Attrs anonymous;
@@ -150,13 +160,13 @@ evo::WifiSample sample(uint32_t atMs, uint32_t frames, uint32_t retries, uint32_
 void logLines() {
     const evo::WifiSample first = sample(1000, 5000, 300, 2, 125, 4250, 3);
     CHECK(evo::describeWifiLink(first, nullptr) ==
-          "5180 MHz; signal -52 dBm (average -51); to the phone 150.0 Mbit/s; from the phone 135.0 Mbit/s; "
+          "5180 MHz; signal -52 dBm (average -51); from the phone 135.0 Mbit/s; "
           "since it joined: 5000 frames sent, 300 retried, 2 lost; on the Wi-Fi for 125 s; "
           "TCP round trip 4.2 ms, 3 segment(s) sent again since it opened");
     // Ten seconds later: what happened in between.
     const evo::WifiSample second = sample(11040, 5812, 335, 2, 135, 38900, 9);
     CHECK(evo::describeWifiLink(second, &first) ==
-          "5180 MHz; signal -52 dBm (average -51); to the phone 150.0 Mbit/s; from the phone 135.0 Mbit/s; "
+          "5180 MHz; signal -52 dBm (average -51); from the phone 135.0 Mbit/s; "
           "in 10 s: 812 frames sent, 35 retried, 0 lost; on the Wi-Fi for 135 s; "
           "TCP round trip 38.9 ms, 6 segment(s) sent again");
     // The phone left the Wi-Fi and came back: its counters started again, nothing is subtracted.
@@ -189,7 +199,38 @@ void logLines() {
     bare.station.txFrames = bare.station.txRetries = bare.station.txFailed = bare.station.connectedS = evo::kNoFigure;
     bare.station.signalAvgDbm = bare.station.rxRate = evo::kNoFigure;
     bare.hasTcp = false;
-    CHECK(evo::describeWifiLink(bare, nullptr) == "5180 MHz; signal -52 dBm; to the phone 150.0 Mbit/s");
+    CHECK(evo::describeWifiLink(bare, nullptr) == "5180 MHz; signal -52 dBm");
+    // The chip did not measure the last frame: the average alone.
+    evo::WifiSample unmeasured = first;
+    unmeasured.station.signalDbm = evo::kNoFigure;
+    unmeasured.hasTcp = false;
+    CHECK(evo::describeWifiLink(unmeasured, nullptr).find("5180 MHz; average signal -51 dBm; from the phone") == 0);
+    // BMW Apps' Bluetooth slot, when the service reads it: last, after the TCP figures.
+    const std::string tcpLine = "TCP round trip 0.9 ms, 0 segment(s) sent again since it opened";
+    evo::WifiSample apps = tcpOnly;
+    apps.apps.read = apps.apps.connected = true;
+    apps.apps.state = apps.apps.transport = 1;
+    CHECK(evo::describeWifiLink(apps, nullptr) == tcpLine + "; BMW Apps Bluetooth link connected");
+    apps.apps.connected = false;
+    apps.apps.transport = 0;
+    CHECK(evo::describeWifiLink(apps, nullptr) == tcpLine + "; BMW Apps Bluetooth link idle");
+    apps.apps.state = 2;
+    apps.apps.transport = 1;
+    CHECK(evo::describeWifiLink(apps, nullptr) == tcpLine + "; BMW Apps Bluetooth slot state 2, link state 1");
+    apps.apps.read = false;
+    CHECK(evo::describeWifiLink(apps, nullptr) == tcpLine);
+    evo::WifiSample appsAlone;
+    appsAlone.apps.read = true;
+    appsAlone.apps.state = 1;
+    CHECK(evo::describeWifiLink(appsAlone, nullptr) == "BMW Apps Bluetooth link idle");
+}
+
+unsigned appsReads = 0;
+bool countAppsReads(void* user, evo::AppsSlot& out) {
+    CHECK(user == &appsReads);
+    ++appsReads;
+    out.connected = true;
+    return true;
 }
 
 // A TCP connection on loopback: the car's end in car, the phone's in phone.
@@ -276,6 +317,23 @@ void connectionCopy() {
         CHECK(closedForPhone(phone));
         close(phone);
     }
+    {  // BMW Apps' slot: read once per line, not at every turn of the main loop.
+        int car = -1, phone = -1;
+        connectPair(car, phone);
+        evo::WifiLinkLog log;
+        log.enable("entry-aad-no-such-interface");
+        log.setAppsProbe(countAppsReads, &appsReads);
+        log.connected(car);
+        close(car);
+        log.turn(1000, true);
+        log.turn(1100, true);
+        CHECK(appsReads == 1);
+        log.turn(11000, true);
+        CHECK(appsReads == 2);
+        log.turn(11100, false);
+        CHECK(appsReads == 2 && closedForPhone(phone));
+        close(phone);
+    }
     {  // A new connection replaces the one before; the log's end gives the last copy back.
         int car = -1, phone = -1, car2 = -1, phone2 = -1;
         connectPair(car, phone);
@@ -302,6 +360,6 @@ int main() {
     logLines();
     tcpFigures();
     connectionCopy();
-    puts("PASS Wi-Fi link: station messages, log lines, TCP figures, the connection's copy");
+    puts("PASS Wi-Fi link: station messages, log lines, TCP figures, the connection's copy, BMW Apps' slot");
     return 0;
 }

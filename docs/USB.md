@@ -69,4 +69,4 @@ case du menu retire le fichier, nom de prise compris : il est à réécrire ensu
 | Rien ne se passe au branchement | Câble de données et non de charge seule. Sur le téléphone, choisir « Transfert de fichiers » dans la notification USB, puis rebrancher. |
 | Le téléphone affiche Android Auto mais pas l'iDrive | Débrancher, attendre 10 secondes, rebrancher. |
 | Pas de son | Le son passe par le Bluetooth : vérifier que le téléphone est connecté à la voiture. |
-| Toujours rien | Activer les journaux ([maintenance](MAINTENANCE.md)), reproduire, et joindre `/tmp/entry-aa-service.log` à un ticket : les lignes `[UsbLoop]` et `[UsbBridge]` disent ce qui a été vu sur les prises. |
+| Toujours rien | Activer les journaux ([maintenance](MAINTENANCE.md)), reproduire, et joindre le journal du service à un ticket : les lignes `[UsbLoop]` et `[UsbBridge]` disent ce qui a été vu sur les prises. |

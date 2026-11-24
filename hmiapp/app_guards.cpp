@@ -8,10 +8,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "../platform/service_contract.hpp"
 #include "app_log.hpp"
+#include "mono_clock.hpp"
 #include "service_link.hpp"
 
 namespace evo {
@@ -123,8 +125,8 @@ bool crashGuardAllows() {
     return true;
 }
 
-void resetGuardsWhenStable(time_t initTime) {
-    if (!g_stableMarked && initTime && time(nullptr) - initTime >= kStableAfterS) {
+void resetGuardsWhenStable(long initTime) {
+    if (!g_stableMarked && initTime && monoSeconds() - initTime >= kStableAfterS) {
         g_stableMarked = true;
         unlink(contract::kAppGuard);  // the HMI has been up 2 min with us: not a crash loop
         unlink(contract::kBootGuard);
@@ -133,8 +135,8 @@ void resetGuardsWhenStable(time_t initTime) {
 }
 
 // ---- start automatically (with a bootloop guard) --------------------------------------------------------------------
-void serviceAutostart(time_t initTime) {
-    if (g_autostartDone || !initTime || time(nullptr) - initTime < kAutostartDelayS) {
+void serviceAutostart(long initTime) {
+    if (g_autostartDone || !initTime || monoSeconds() - initTime < kAutostartDelayS) {
         return;
     }
     g_autostartDone = true;
@@ -175,6 +177,21 @@ void toggleUsbCable() {
     bool on = usbCableOn();
     setSwitch("USB cable", contract::kUsb, !on, "");  // empty: every USB port, as `touch` leaves it
     alog("menu: USB cable %s -> %s", on ? "on" : "off", usbCableOn() ? "on" : "off");
+}
+
+bool keepLogsOn() {
+    return fileExists(contract::kMaintenance);
+}
+
+void toggleKeepLogs() {
+    const bool on = keepLogsOn();
+    if (on) {
+        alog("menu: keep logs off: the app's log stops here");  // the last line, written while still on
+    }
+    setSwitch("keep logs", contract::kMaintenance, !on, "");
+    if (!on) {
+        alog("menu: keep logs on: the service's log starts with its next start");
+    }
 }
 
 }  // namespace app

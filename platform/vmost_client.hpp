@@ -9,7 +9,8 @@
 //   cb(msg, user); msg: +0 u16 address, +2 u8 FBlock, +3 u8 instance, +4 u16 function, +8 u32 OpType,
 //                       +12 u16 length, +16 data pointer (the library sets it to msg+0x18).
 // vmostConnect retries forever when the daemon's socket is missing: load() never opens the library without one.
-// Users: the controller and volume reader (evo_knob) and the hotspot request (evo_wlan).
+// Users: the controller and volume reader (evo_knob), which lends its connection to the cluster's guidance fields
+// (kombi_most), and the hotspot request (evo_wlan).
 #ifndef ENTRY_AAD_PLATFORM_VMOST_CLIENT_HPP
 #define ENTRY_AAD_PLATFORM_VMOST_CLIENT_HPP
 
@@ -86,6 +87,27 @@ private:
 
 // Host tests: a fake vmostd socket and client library instead of the car's.
 void setVmostForTest(const char* socketPath, const char* library);
+
+// The controller reader's connection, lent to another user of the bus (the cluster's guidance fields,
+// platform/kombi_most.hpp): the service keeps a single vmostd connection, on the controller reader's thread.
+class VmostPort {
+public:
+    virtual ~VmostPort() {}
+    virtual int send(VmostMsgOut& m) = 0;  // 0: handed to vmostd
+    virtual int shadow(uint8_t fblock, uint8_t inst, bool on) = 0;
+    virtual void pump(int ms) = 0;  // reads what arrives for that long; only when the reader is closing
+};
+
+// That other user. All calls on the controller reader's thread.
+class VmostPeer {
+public:
+    virtual ~VmostPeer() {}
+    virtual bool wants(const VmostMsgView& m) const = 0;  // a message for it, not for the controller reader
+    virtual void onMessage(const VmostMsgView& m) = 0;
+    virtual int dueInMs(uint32_t nowMs) const = 0;  // how soon tick() has work; the reader waits 100 ms at most
+    virtual void tick(uint32_t nowMs, VmostPort& port) = 0;
+    virtual void finish(VmostPort& port) = 0;  // the connection closes right after
+};
 
 }  // namespace evo
 

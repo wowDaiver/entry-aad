@@ -1618,6 +1618,7 @@ public:
         config.clusterPort = kombi_.port();
         config.offFile = off_;
         config.markerFile = marker_;
+        config.singleFile = std::string(dir_) + "/kombi-single-maneuver";
         config.guide.approachMiles = 1.0;
         nav_ = new km::Arrows(config);
         nav_->start(withProbe ? &probe : nullptr);

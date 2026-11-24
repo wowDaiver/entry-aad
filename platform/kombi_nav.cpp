@@ -11,6 +11,7 @@
 #include <cstdio>
 
 #include "evo_log.hpp"
+#include "kombi_most.hpp"
 #include "service_contract.hpp"
 
 namespace evo {
@@ -45,7 +46,8 @@ ArrowsConfig::ArrowsConfig()
       clusterPort(30502),
       handle(0xC8),
       offFile(evo::contract::kKombiOff),
-      markerFile(evo::contract::kKombiShown) {}
+      markerFile(evo::contract::kKombiShown),
+      singleFile(evo::contract::kKombiSingle) {}
 
 SendOutcome Arrows::Output::send(const std::vector<Request>& requests, std::string* why) {
     return arrows_.link_.send(requests, why);
@@ -58,7 +60,8 @@ bool Arrows::Output::cancel(std::string* why) {
 
 Arrows::Arrows(const ArrowsConfig& config)
     : config_(config),
-      graph_(config_.handle, config_.guide.hideBar ? 255 : RouteGraph::kTemplateBar),
+      singleManeuver_(access(config_.singleFile.c_str(), F_OK) == 0),
+      graph_(config_.handle, config_.guide.hideBar ? 255 : RouteGraph::kTemplateBar, singleManeuver_),
       link_(config_.clusterAddress, config_.clusterPort),
       output_(*this),
       guide_(graph_, output_, config_.guide),
@@ -73,6 +76,7 @@ Arrows::Arrows(const ArrowsConfig& config)
       retryAt_(0),
       linkFailures_(0),
       marked_(false),
+      most_(nullptr),
       bmwGuiding_(false),
       watching_(false) {
     pthread_mutex_init(&mu_, nullptr);
@@ -104,6 +108,7 @@ void Arrows::start(BmwProbe probe) {
     probe_ = probe;
     link_.armEmergencyCancel(graph_);
     const GuideSettings& s = config_.guide;
+    ELOG(kTag, "route graph: %s", singleManeuver_ ? "next maneuver only (14 requests)" : "whole captured route");
     ELOG(kTag,
          "cluster/HUD arrows %s; KOMBI %s:%u handle 0x%X, approach %g mi, bar %s, BMW-guidance yield %s, lanes %s, "
          "in-place %d",
@@ -159,6 +164,9 @@ void Arrows::watchBmwGuidance() {
         pthread_mutex_lock(&watchMu_);
         bmwGuiding_ = state == 1;
         pthread_mutex_unlock(&watchMu_);
+        if (most_) {
+            most_->setBmwGuiding(state == 1);
+        }
         doze(kWatchEveryS, &Arrows::quitting, this);
     }
 }
@@ -296,6 +304,9 @@ void Arrows::tick(double now) {
     guide_.step(shown, now, why);
     if (guide_.showing()) {
         linkFailures_ = 0;
+        if (most_) {
+            most_->setEthernetSeen();  // a G-series KOMBI: the MOST cluster is left alone
+        }
     }
     if (guide_.stopped() == Guide::kStoppedRefused) {
         ELOG(kTag,

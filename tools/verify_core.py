@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTICE = "> Required Notice: Copyright (c) 2026 Jiraiya43 - entry-aad"
+NOTICE = "> Required Notice: Copyright (c) 2026 Jiraiya43 - EntryNav2 (EntryEvo) Android Auto"
 CREDITS = "## Credits"
 HEADER = "SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0"
 SOURCE_DIRS = ("core", "platform", "hmiapp", "tools", "tests")
