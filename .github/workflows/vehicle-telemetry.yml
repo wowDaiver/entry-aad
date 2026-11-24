@@ -4,12 +4,14 @@ on:
   push:
     branches: [feat/vehicle-telemetry]
     paths:
+      - VERSION
       - development/vehicle-telemetry/**
       - diagnostics/**
       - tests/fixtures/vehicle-telemetry/**
       - .github/workflows/vehicle-telemetry.yml
   pull_request:
     paths:
+      - VERSION
       - development/vehicle-telemetry/**
       - diagnostics/**
       - tests/fixtures/vehicle-telemetry/**
