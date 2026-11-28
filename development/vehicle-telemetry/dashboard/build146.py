@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -10,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROJECT = ROOT.parents[1]
+PROJECT = Path(os.environ.get("VEHICLE_TELEMETRY_OWNER_ROOT", str(ROOT.parents[1]))).resolve()
 QEMU = PROJECT.parent / "entrynav2-qemu"
 BASE = ROOT / "build"
 OUT = BASE / "graphics146"

@@ -34,6 +34,11 @@ def build(destination, refresh=False):
     if destination.exists() and (not refresh or (destination / "reports").exists()):
         raise RuntimeError("Destination exists or contains reports; preserve it, use a new path.")
     report = json.loads((ROOT / "build/report.json").read_text())
+    if report.get("egs_network_policy") == "internal-tester-assistant-v1":
+        raise RuntimeError(
+            "Internal transport also requires its worker and systemd unit. "
+            "Use a private upgrade kit with install_most146.sh; legacy DSO-only packaging is blocked."
+        )
     candidate = ROOT / "build/libVehicleTelemetry.146-candidate.so"
     source = ROOT / "build/native-menu"
     # Reject a stale resource bundle or source tree; do not silently package an older DSO.

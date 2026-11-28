@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Read-only internal vehicle instrument transport
+After=vmostd.service
+
+[Service]
+Type=simple
+Environment="LD_LIBRARY_PATH=/usr/local/lib:/opt/hmi/lib:/usr/lib:/lib"
+ExecStart=/opt/vehicle-telemetry/vehicle-telemetry-most
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=focussed.target

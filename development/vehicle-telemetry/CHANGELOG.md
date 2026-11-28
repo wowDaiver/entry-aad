@@ -1,5 +1,16 @@
 # Vehicle Telemetry
 
+## 0.2.0 - 2026-11-25
+
+- Replace the cable-activated external Ethernet diagnostic route with the native internal TesterAssistent channel.
+- Isolate the process-global VMOST library in a separate, firmware-gated service, reached through a private Unix socket.
+- Retain the DDE/EGS identity gates and exact read allowlist; stop bus activity when the instrument page closes.
+- Discard replies from closed clients and quarantine uncertain transactions before reconnecting.
+- Add real-worker sanitizer regressions and transactional worker/unit/plugin installation with rollback rehearsals.
+
+All 17 diagnostic records answered through the internal channel on the parked owner146 vehicle.
+Cold startup after a full vehicle sleep still requires physical validation.
+
 ## 0.1.0 - 2026-11-18
 
 - Native instrument dashboard for EntryNav2 002_146_002, isolated from Android Auto.

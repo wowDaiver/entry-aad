@@ -3,13 +3,14 @@
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PROJECT = ROOT.parents[1]
+PROJECT = Path(os.environ.get("VEHICLE_TELEMETRY_OWNER_ROOT", str(ROOT.parents[1]))).resolve()
 sys.path.insert(0, str(PROJECT / "development/abi-146/scripts"))
 from elf32 import ELF32  # noqa: E402
 
@@ -341,6 +342,21 @@ def main():
     (out / "profile146.hpp").write_text(header)
     logs += run(
         [
+            compiler,
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I" + str(out),
+            ROOT / "most_worker.cpp",
+            "-ldl",
+            "-lrt",
+            "-o",
+            out / "vehicle-telemetry-most",
+        ]
+    )
+    logs += run(
+        [
             "/opt/homebrew/opt/llvm/bin/clang++",
             "-std=c++11",
             "-Wall",
@@ -512,7 +528,12 @@ def main():
         native_menu=menu_bundle,
         python_tests=sum(int(n) for n in re.findall(r"Ran (\d+) tests? in", logs)),
         activation_policy="persistent-startup-guard",
-        egs_network_policy="vehicle-egs-hsfz-v1",
+        egs_network_policy="internal-tester-assistant-v1",
+        internal_transport_worker=dict(
+            path=str(out / "vehicle-telemetry-most"),
+            sha256=hashlib.sha256((out / "vehicle-telemetry-most").read_bytes()).hexdigest(),
+            elf=ELF32(out / "vehicle-telemetry-most").metadata(),
+        ),
         diagnostic_profiles={
             "0x12": {
                 "sgbd": "0F1FF0",

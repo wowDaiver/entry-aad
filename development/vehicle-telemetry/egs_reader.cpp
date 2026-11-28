@@ -8,7 +8,10 @@
 #include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
+
+#include "most_protocol.hpp"
 #ifdef TELEMETRY_EGS_CHECK
 #include <stdio.h>
 #endif
@@ -121,7 +124,11 @@ void EgsReader::connect_socket(double now) {
     return;  // Host controller/factory tests must never contact a vehicle.
 #endif
     close_socket();
+#ifdef TELEMETRY_EGS_LOOPBACK_TEST
     fd_ = socket(AF_INET, SOCK_STREAM, 0);
+#else
+    fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
     if (fd_ < 0) {
         fail(now);
         return;
@@ -130,6 +137,7 @@ void EgsReader::connect_socket(double now) {
         fail(now);
         return;
     }
+#ifdef TELEMETRY_EGS_LOOPBACK_TEST
     sockaddr_in local;
     memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
@@ -137,22 +145,20 @@ void EgsReader::connect_socket(double now) {
     memset(&peer, 0, sizeof(peer));
     peer.sin_family = AF_INET;
     peer.sin_port = htons(6801);
-#ifdef TELEMETRY_EGS_LOOPBACK_TEST
     // Separate host test/probe binary only. No configurable production endpoint.
     inet_pton(AF_INET, "127.0.0.1", &local.sin_addr);
     inet_pton(AF_INET, "127.0.0.1", &peer.sin_addr);
-#elif defined(TELEMETRY_EGS_INTERNAL_CHECK)
-    inet_pton(AF_INET, "160.48.199.119", &local.sin_addr);
-    inet_pton(AF_INET, "160.48.199.16", &peer.sin_addr);
-#else
-    // This vehicle's observed ENET addresses. Fail closed if the route changes.
-    inet_pton(AF_INET, "169.254.1.0", &local.sin_addr);
-    inet_pton(AF_INET, "169.254.76.216", &peer.sin_addr);
-#endif
     if (bind(fd_, reinterpret_cast<sockaddr*>(&local), sizeof(local)) < 0) {
         fail(now);
         return;
     }
+#else
+    sockaddr_un peer;
+    memset(&peer, 0, sizeof(peer));
+    peer.sun_family = AF_UNIX;
+    static_assert(sizeof(MostSocketPath) <= sizeof(peer.sun_path), "local MOST socket path");
+    memcpy(peer.sun_path, MostSocketPath, sizeof(MostSocketPath));
+#endif
 #ifdef SO_NOSIGPIPE
     int on = 1;
     if (setsockopt(fd_, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on)) < 0) {
@@ -192,7 +198,9 @@ void EgsReader::request(unsigned did, double now) {
     did_ = did;
     frames_ = 0;
     phase_ = Sending;
-    deadline_ = now + 3;
+    // The on-board assistant may still be starting after a vehicle wake.
+    // This is an asynchronous deadline; the HMI dispatcher never waits here.
+    deadline_ = now + (did == 0xf150 ? 10 : 3);
 }
 int EgsReader::record_index(unsigned did) const {
     unsigned count = 0;

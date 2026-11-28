@@ -5,7 +5,8 @@
 #include "diagnostic_schedule.hpp"
 namespace telemetry {
 // Nonblocking, fixed read allowlist. All calls run on the HMI dispatcher.
-// No worker, DNS, session change, coding, tester-present or CAN commands.
+// Physical builds use the local read-only MOST worker, with no ENET fallback.
+// No DNS, session change, coding, tester-present or ECU control commands.
 class EgsReader {
 public:
     explicit EgsReader(unsigned ecu = 0x18, bool expanded = false);

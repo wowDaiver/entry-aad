@@ -1,4 +1,4 @@
-# Vehicle Telemetry 0.1.0 — EntryNav2 146
+# Vehicle Telemetry 0.2.0 — EntryNav2 146
 
 Experimental standalone native instrument plugin for `002_146_002`. It does not change the Android Auto daemon.
 The module keeps its GPL-3.0-or-later license; the enclosing Android Auto project retains its own license.
@@ -16,7 +16,9 @@ RPM/speed subscriptions and the graphic frame limit are 200 ms; actual rates dep
 
 DDE12 must identify as `0F1FF0`, EGS18 as `0F21D0`. Reads are sequential, nonblocking and allowlisted,
 with fixed frame/size/deadline limits. No diagnostic sessions, security access, ECU writes or actuation are used.
-The existing owner-specific ENET endpoints are constants, not vehicle-discovery results for other cars.
+The physical build uses the native internal TesterAssistent service through an isolated VMOST worker.
+There is no external Ethernet diagnostic fallback. The internal envelope and all 17 diagnostic records
+were verified on the parked owner146 vehicle. Startup after a full vehicle sleep remains a separate live check.
 
 - SoC: DDE43C2, separate from CDS255; torque: DDE48A5; horsepower requires fresh torque and CDS RPM.
 - Sport: DA2E D with a fresh DA27 M/S gate; manual M takes precedence.
@@ -38,8 +40,8 @@ python3 development/vehicle-telemetry/check_host.py --font /usr/share/fonts/true
 ```
 
 On macOS the runner also discovers LLVM, XQuartz FreeType and an installed system font. No font is distributed.
-Checks cover 52 Python tests, 12 core ASan/UBSan suites, the physical graphics controller with a host font,
-and PNG rendering. Factory/ARM checks and transactional installation rehearsals require private owner inputs;
+Checks cover 64 Python tests, 12 core ASan/UBSan suites, the isolated worker, installation/rollback rehearsals,
+the physical graphics controller with a host font and PNG rendering. Factory/ARM checks require private owner inputs;
 the 146 firmware Build ID/vtable gate is not replaced by the host stubs.
 
 `dashboard/offline_mapping.py` replays eight sanitized captures separately through the native decoder and renderer.
@@ -62,3 +64,29 @@ requires the matching private kit, a parked car and a stopped AA service. Review
 Source formats: pinned `emdzej/ediabasx-docs-sgbd` commit
 `b644de8fbfbb4b207f57794e3c7894dc1dc58627`; the GPL profile gate provenance is in `vendor/kizapp/SOURCE.json`.
 No BMW library, font or original firmware asset is part of this module.
+
+## Internal diagnostic transport
+
+The dashboard connects to `/run/vehicle-telemetry/most.sock`. The worker authenticates the local peer,
+checks the exact HMI/AppFramework/CoreFramework firmware IDs and accepts only the existing DDE/EGS reads.
+Each ECU must pass its F150 identity check in every client session before measurements are forwarded.
+The worker constructs the native TesterAssistent envelope itself: FBlock 6, instance F0, channel A (function 50),
+source 63, routine 0F0B containing only an allowlisted read. Neither caller-provided routines nor ECU writes are accepted.
+
+Only one request may be outstanding. Responses must match channel, source, ECU, DID and exact length.
+Closing the dashboard closes the local connection and bus subscription. A reply left over from a closed client
+is discarded; an uncertain transaction triggers a 30-second quarantine and a new bus connection.
+Unavailable or stale measurements keep the existing unknown/expiry behavior.
+`/var/local/data/VehicleTelemetry146/most.status` records the boot ID, connection state and validated-record mask.
+
+`build.py` builds the separate ARM worker as well as the plugin. To use private inputs with this public checkout,
+set `VEHICLE_TELEMETRY_OWNER_ROOT` to the prepared owner workspace before running `build.py` and `dashboard/build146.py`.
+The worker belongs at `/opt/vehicle-telemetry/vehicle-telemetry-most`; the accompanying systemd unit starts it
+with `focussed.target`. It does not open the diagnostic bus until the dashboard asks for a read.
+
+`install_most146.sh` runs from `remote/` of a private kit containing the existing verified `common.sh`,
+`firmware.sha256`, `payload.sha256`, `REMOTE_SHA256SUMS`, unchanged menu resources in `payload/`, the new plugin,
+and the worker/unit in `transport/`. It supports `check`, `install` and `rollback`, pins the known predecessor,
+preserves its mapped inode, checks every write and restores root RO. Stop AA and any existing transport worker first;
+reload systemd after installation and reboot the HU to load the plugin. No BMW binary or AA setting is changed.
+The legacy DSO-only kit generator rejects this build because it cannot install the required worker and unit.

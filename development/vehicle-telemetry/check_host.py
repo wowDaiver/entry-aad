@@ -65,6 +65,10 @@ def main():
         stub = ["-DTELEMETRY_HOST_ABI_STUB"] if name in ("native", "controller", "egs", "transport") else []
         run([cxx, *flags, *stub, *sources, "-o", exe])
         run([exe])
+    run([cxx, *flags, "-DTELEMETRY_MOST_WORKER_TEST", "most_worker.cpp", "-o", out / "host-most-worker", "-ldl"])
+    run([cxx, *flags, "-shared", "-fPIC", "tests_support/fake_vmost.cpp", "-o", out / "host-fake-vmost.so"])
+    run([sys.executable, "-m", "unittest", "-v", "test_most_worker.py"])
+    run([sys.executable, "-m", "unittest", "discover", "-s", "offline-tests", "-p", "test_most_install.py", "-v"])
     run([cxx, *flags, "telemetry_model.cpp", "replay.cpp", "-o", out / "telemetry-replay-host"])
     # Tests import the same source mapper, with an explicit host-owned font.
     script = "import unittest,test_source_mapping; test_source_mapping.mapping.FONT=" + repr(str(font))
@@ -92,8 +96,11 @@ def main():
     )
     run([exe])
     run([sys.executable, "dashboard/check.py", "--font", font])
-    print("PASS: 52 Python tests, 12 core sanitizer suites, physical graphics controller and PNG checks")
-    print("Factory/ARM firmware checks and private installer-kit rehearsals require separate owner inputs.")
+    print(
+        "PASS: 64 Python tests, 12 core sanitizer suites, isolated MOST worker, "
+        "physical graphics controller and PNG checks"
+    )
+    print("Factory/ARM firmware checks and complete private-kit checks require separate owner inputs.")
 
 
 if __name__ == "__main__":
